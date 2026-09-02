@@ -6,6 +6,9 @@
 **Python:** 3.8+  
 **Tools:** 40-IN-1 Security Platform  
 
+
+---
+this application may be detected by antivirus due to the msfvenom module and the ncat module.
 ---
 
 ## TABLE OF CONTENTS
