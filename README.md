@@ -25,8 +25,9 @@ this application may be detected by antivirus due to the msfvenom module and the
 10. [Image Logger — Vercel Deployment](#image-logger--vercel-deployment)
 11. [Logging & Privacy](#logging--privacy)
 12. [Configuration & Customization](#configuration--customization)
-13. [Dependencies](#dependencies)
-14. [Disclaimer](#disclaimer)
+13. [UI Themes & Directory Banners](#ui-themes--directory-banners)
+14. [Dependencies](#dependencies)
+15. [Disclaimer](#disclaimer)
 
 ---
 
@@ -568,6 +569,55 @@ Access settings via the main menu or directly in `core/etc/settings.py`:
 All modules are loaded from `core/` with independent imports. To disable a module:
 1. Delete or rename its folder under `core/`
 2. The mainframe will skip it gracefully with a "not loaded" message
+
+---
+
+## UI THEMES & DIRECTORY BANNERS
+
+MAINFRAME supports 20 visual UI themes, each with its own themed directory banner that displays the full command list for each subdirectory.
+
+### Available Themes
+
+| Theme | UI Name | Style |
+|-------|---------|-------|
+| 1 | Terminal UI (Default) | Plain `[NN]` format, no decorative banner |
+| 2 | Planet UI | 🪐 Orbital sector with space/art deco styling |
+| 3 | Mainframe UI | Green terminal style with box borders |
+| 4 | Reaper UI | ☠ Skull & crossbones with Soul Reaper ASCII art |
+| 5 | Hitla UI | Classified archive with security badge framing |
+| 6 | Matrix UI | Green code rain aesthetic |
+| 7 | Cyberpunk 2077 UI | Netrunner deck / ICE breaker theme |
+| 8 | Ghost Shell UI | Phantom protocol with GHOST SHELL ASCII art |
+| 9 | Devil Core UI | 🔥 Infernal devil with hellfire styling |
+| 10 | Retro 80s Synth UI | Retro cassette/terminal aesthetic |
+| 11 | Neon Hack UI | Glowing neon cyber aesthetic |
+| 12 | Deep Space Node UI | Cosmic space exploration theme |
+| 13 | Morty Exact ASCII Art UI | 🟢 Dimension C-137 portal with Rick & Morty art |
+| 14 | Medieval UI | ⚔️ Guild archives with scroll/medieval styling |
+| 15 | Steampunk UI | ⚙️ Industrial steam-powered aesthetic |
+| 16 | Synthwave UI | ◢◤ 1984 vaporwave digital theme |
+| 17 | Wasteland UI | ☣️ Post-apocalyptic hazard zone |
+| 18 | Corporate UI | Strategic compliance directory (table format) |
+| 19 | Abyssal UI | 🌊 Deep ocean trench sonar theme |
+| 20 | Void UI | 👁️ Cosmic horror / void dimension |
+
+### Directory Banner Structure
+
+Each directory (DIR 01-DIR 05) has its own themed banner showing all available commands:
+
+- **SUB-DIRECTORY 01**: Network Infrastructure & Endpoint Recon (11 commands)
+- **SUB-DIRECTORY 02**: External OSINT & Target Profile Management (8 commands)
+- **SUB-DIRECTORY 03**: Local Data Traffic, Security Audits & Utilities (6 commands)
+- **SUB-DIRECTORY 04**: Advanced Infrastructure Audits & Integrity (10 commands)
+- **SUB-DIRECTORY 05**: Attack Vectors, Exploit Frameworks & Defensive Auditing (10 commands)
+
+### Customizing UI Themes
+
+Theme files are located in `core/dir_banners.py`:
+- Edit `DIR_ITEMS` to modify command names and descriptions per directory
+- Edit `_art_*` functions to change the decorative ASCII art per theme
+- Edit `THEME_INFO` to remap themes to art/color combinations
+- The `MARKERS` dict controls the command line markers (◯, ☠, 🔥, etc.) per theme
 
 ---
 
