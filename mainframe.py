@@ -12,25 +12,40 @@ Visual Layer       : Cross-Platform Background Daemon Window-Title Matrix Scramb
 ================================================================================
 """
 # ================================================================================
-class Colors:
-    """
-    High-visibility ANSI console formatting control strings.
-    Provides standard 16-color virtual terminal attribute configurations.
-    """
-    RED = '\033[91m'
-    AMBER = '\033[93m'
-    YELLOW = '\033[93m'
-    GREEN = '\033[92m'
-    CYAN = '\033[96m'
-    RESET = '\033[0m'
-    BOLD = '\033[1m'
-    UNDERLINE = '\033[4m'
-    
-    # Absolute terminal clearance code sequence:
-    # \033[2J -> Erase active viewing canvas
-    # \033[3J -> Fully purge scrollback cache history buffer blocks
-    # \033[H  -> Reset hardware cursor context to coordinates 0,0
-    CLEAR_SCREEN = '\033[2J\033[3J\033[H'
+# --- UI & Rendering Layer (rich-powered; falls back to ANSI if unavailable) ---
+try:
+    from core.ui import ConsoleUI, get_ui
+    from core.ui.console import Colors
+except Exception:
+    class Colors:
+        """
+        Fallback ANSI console formatting control strings (used when rich is not installed).
+        Provides standard 16-color virtual terminal attribute configurations.
+        """
+        RED = '\033[91m'
+        AMBER = '\033[93m'
+        YELLOW = '\033[93m'
+        GREEN = '\033[92m'
+        CYAN = '\033[96m'
+        RESET = '\033[0m'
+        BOLD = '\033[1m'
+        UNDERLINE = '\033[4m'
+        MAGENTA = '\033[95m'
+        WHITE = '\033[97m'
+        BLUE = '\033[94m'
+        BRIGHT_CYAN = '\033[96m'
+        BRIGHT_GREEN = '\033[92m'
+        BRIGHT_YELLOW = '\033[93m'
+        BRIGHT_RED = '\033[91m'
+        BRIGHT_MAGENTA = '\033[95m'
+        CLEAR_SCREEN = '\033[2J\033[3J\033[H'
+
+    ConsoleUI = None
+
+    def get_ui():
+        return None
+
+ui = get_ui() if ConsoleUI else None
 # ================================================================================
 # --- NEW IMPORTS FOR BEAST BOMBER CATEGORY 5 ---
 import sys
@@ -86,6 +101,16 @@ except Exception:
 
 # --- END NEW IMPORTS ---
 
+# --- UI Theme Engine (dynamic banner themes via the `customize` command) ---
+try:
+    from core.ui_theme import (DIR_THEME_STYLES, load_theme, save_theme,
+                               handle_customize, show_theme, render_directory_ui)
+    _CURRENT_THEME = load_theme()
+except Exception:
+    _CURRENT_THEME = "1"
+    DIR_THEME_STYLES = {}
+    load_theme = save_theme = handle_customize = show_theme = render_directory_ui = None
+
 # Engine module instances — created here so all menus can use them
 ddos_attack = DDoSAttack() if DDoSAttack else None
 bruteforce_attack = BruteForceAttack() if BruteForceAttack else None
@@ -103,6 +128,11 @@ import subprocess
 import shutil
 import ctypes
 import threading
+import _thread
+try:
+    import msvcrt
+except ImportError:
+    msvcrt = None
 import hashlib
 import platform
 import re
@@ -111,15 +141,26 @@ import webbrowser
 from concurrent.futures import ThreadPoolExecutor
 import urllib.request
 import urllib.error
+from getpass import getpass
 
 # Initialize and synchronize virtual terminal sequences across Windows environments natively
 if sys.platform.startswith('win'):
     try:
-        # Enable ANSI escape processing explicitly for modern cmd/powershell sandboxes
         kernel32 = ctypes.windll.kernel32
         kernel32.SetConsoleMode(kernel32.GetStdHandle(-11), 7)
     except Exception:
         os.system('')
+
+# Rich rendering helpers (available when rich is installed)
+if ConsoleUI is not None:
+    from rich.table import Table
+    from rich.box import ROUNDED, DOUBLE
+    from rich.text import Text as RichText
+else:
+    Table = None
+    ROUNDED = None
+    DOUBLE = None
+    RichText = None
 
 class DualStreamWriter:
     """
@@ -188,13 +229,63 @@ class DualStreamWriter:
             self.terminal.flush()
             self.log_file.flush()
 
+
+def _render_directory_menu(title, items, header_color="cyan", dir_id="01"):
+    """Render a subdirectory menu in the same `[NN] Name - Description`
+    two-column layout as the main `help`/`tools` matrix.
+
+    Theme-sensitive: when the active UI has a directory banner in the
+    dir_banners module, the themed banner (with full command list embedded)
+    is printed. Theme "1" (default) renders plain [NN] format.
+    """
+    if render_directory_ui is not None:
+        render_directory_ui(_CURRENT_THEME, dir_id, items)
+        return
+
+    style = DIR_THEME_STYLES.get(_CURRENT_THEME, DIR_THEME_STYLES.get("1", {}))
+    if style.get("plain"):
+        print(f"  [{title}]")
+        print()
+        if not items:
+            return
+        maxw = max(len(item[1]) for item in items)
+        for item in items:
+            raw_key = item[0]
+            key = f"{int(raw_key):02d}" if str(raw_key).isdigit() else str(raw_key)
+            name = item[1]
+            desc = item[2] if len(item) > 2 else ""
+            print(f"  [{key}] {name.ljust(maxw)} - {desc}")
+        return
+
+    tcolor = style.get("color", header_color)
+    tmarker = style.get("marker", "")
+    print(f"{tcolor}  [{title}]{Colors.RESET}")
+    print()
+    if not items:
+        return
+    maxw = max(len(item[1]) for item in items)
+    for item in items:
+        raw_key = item[0]
+        key = f"{int(raw_key):02d}" if str(raw_key).isdigit() else str(raw_key)
+        name = item[1]
+        desc = item[2] if len(item) > 2 else ""
+        print(f"{tcolor}  {tmarker} [{key}] {name.ljust(maxw)} - {desc}{Colors.RESET}")
+
+
 class MainframeUI:
-    """Handles the rendering engines for banners, text structures, and menu loops."""
-    
+    """Handles the rendering engines for banners, text structures, and menu loops.
+
+    All rendering delegates to the rich-powered ConsoleUI singleton when available,
+    falling back to ANSI Colors.* codes for environments without rich.
+    """
+
     @staticmethod
     def draw_banner():
         """Renders the central system cybernetic telemetry node graphic."""
-        skull_ascii = r"""
+        if ui is not None:
+            ui.banner()
+        else:
+            skull_ascii = r"""
          ______
       .-"      "-.
      /            \
@@ -206,16 +297,20 @@ class MainframeUI:
      \__|IIIIII|__/
       | \IIIIII/ |
       \          /
-       `--------`"""
-        print(f"{Colors.CYAN}{skull_ascii}{Colors.RESET}")
-        print(f"{Colors.BOLD}{Colors.GREEN}" + "=" * 80)
-        print("   MAINFRAME COMPREHENSIVE SECURITY RECONNAISSANCE ENGINE // MULTI-CORE")
-        print("   DEPLOYMENT SPECIFICATION RELEASE v5.90 // COMPLETE 40-IN-1 TOOL PLATFORM")
-        print("=" * 80 + f"{Colors.RESET}\n")
+      `--------`"""
+            print(f"{Colors.CYAN}{skull_ascii}{Colors.RESET}")
+            print(f"{Colors.BOLD}{Colors.GREEN}" + "=" * 80)
+            print("   MAINFRAME COMPREHENSIVE SECURITY RECONNAISSANCE ENGINE // MULTI-CORE")
+            print("   DEPLOYMENT SPECIFICATION RELEASE v5.90 // COMPLETE 40-IN-1 TOOL PLATFORM")
+            print("=" * 80 + f"{Colors.RESET}\n")
 
     @staticmethod
     def display_main_menu():
         """Prints the consolidated, clean high-level operational categories."""
+        if ui is not None:
+            ui.main_menu()
+            return
+
         print(f"{Colors.BOLD}{Colors.GREEN}[MAIN SYSTEM DIRECTORY CORE]{Colors.RESET}\n")
         print(f"  [{Colors.AMBER}1{Colors.RESET}] Sub-Directory 01 // Network Infrastructure & Endpoint Recon Cores")
         print(f"  [{Colors.CYAN}2{Colors.RESET}] Sub-Directory 02 // External OSINT & Target Record Profilers")
@@ -229,82 +324,102 @@ class MainframeUI:
     @staticmethod
     def display_network_menu():
         """Submenu for core infrastructure mapping and connectivity analysis routines."""
-        print(f"{Colors.AMBER}[SUB-DIRECTORY 01 // NETWORK INFRASTRUCTURE & ENDPOINT RECON]{Colors.RESET}\n")
-        print("  [1] High-Speed Rainbow Echo Pinger Latency Monitor")
-        print("  [2] Reverse DNS Infrastructure Resolver (IP-to-Host PTR Check)")
-        print("  [3] Multi-Threaded Target Service Port Scanner & Vulnerability Profiler")
-        print("  [4] Local Subnet Parallel Ping Sweeper Matrix")
-        print("  [5] Network Application Service Banner Grabber Auditor")
-        print("  [6] Passive Domain Subdomain Discovery Engine (via crt.sh Logs)")
-        print("  [7] Advanced RDAP Registration Infrastructure Allocation Mapper")
-        print("  [8] HTTP Header Security Compliance & Hardening Auditor")
-        print("  [9] DNS-over-HTTPS (DoH) Client Resolver Subsystem")
-        print("  [10] IP Address Geolocation & Metadata Lookup")
-        print("\n" + f"{Colors.CYAN}[NAVIGATION FRAMEWORK]{Colors.RESET}")
-        print("  [11] Return to Main System Directory Core")
-        print(f"\n{Colors.BOLD}{Colors.AMBER}" + "-" * 80 + f"{Colors.RESET}")
+        _render_directory_menu(
+            "SUB-DIRECTORY 01 // NETWORK INFRASTRUCTURE & ENDPOINT RECON",
+            [
+                ("1", "Rainbow Echo Pinger", "ICMP latency & reachability monitor", "cyan"),
+                ("2", "Reverse DNS Resolver", "IP-to-host PTR resolution", "cyan"),
+                ("3", "Port Scanner", "Multi-threaded port & service profiler", "cyan"),
+                ("4", "Ping Sweeper", "Local subnet parallel host discovery", "cyan"),
+                ("5", "Banner Grabber", "Remote service banner extractor", "cyan"),
+                ("6", "Subdomain Finder", "Passive subdomain discovery via crt.sh logs", "cyan"),
+                ("7", "RDAP Lookup", "WHOIS registration & allocation mapper", "cyan"),
+                ("8", "HTTP Header Auditor", "Security header compliance & hardening", "cyan"),
+                ("9", "DoH Resolver", "DNS-over-HTTPS client resolver", "cyan"),
+                ("10", "IP Lookup", "IP geolocation & metadata reconnaissance", "cyan"),
+                ("11", "Return to Main Directory", "Exit directory and reload the system core", "cyan"),
+            ],
+            "cyan",
+            "01",
+        )
 
     @staticmethod
     def display_osint_menu():
         """Submenu for active profile tracking and threat directory auditing lookups."""
-        print(f"{Colors.CYAN}[SUB-DIRECTORY 02 // EXTERNAL OSINT & TARGET PROFILE MANAGEMENT]{Colors.RESET}\n")
-        print("  [1] Sherlock Username Account Tracer (Live Shell Subprocess Launch)")
-        print("  [2] PhoneInfoga Telecom Target Scanner (Live Shell Subprocess Launch)")
-        print("  [3] Holehe Email Platform Account Auditor (Live Shell Subprocess Launch)")
-        print("  [4] Socialscan Concurrent Identity Profiler (Live Shell Subprocess Launch)")
-        print("  [5] Live Online Data Breach Explorer & Password Leak Checker")
-        print("  [6] Tor Exit Node Network Threat Intelligence Node Validator")
-        print("  [7] IDN Homograph Phishing Domain & Punycode Analyzer")
-        print("\n" + f"{Colors.AMBER}[NAVIGATION FRAMEWORK]{Colors.RESET}")
-        print("  [8] Return to Main System Directory Core")
-        print(f"\n{Colors.BOLD}{Colors.CYAN}" + "-" * 80 + f"{Colors.RESET}")
+        _render_directory_menu(
+            "SUB-DIRECTORY 02 // EXTERNAL OSINT & TARGET PROFILE MANAGEMENT",
+            [
+                ("1", "Sherlock", "Username tracer across social platforms", "blue"),
+                ("2", "PhoneInfoga", "Telecom & phone-number intelligence scanner", "blue"),
+                ("3", "Holehe", "Breach-email auditor across providers", "blue"),
+                ("4", "Socialscan", "Identity & account existence profiler", "blue"),
+                ("5", "Breach Checker", "Live data breach & password-leak checker", "blue"),
+                ("6", "Tor Exit Validator", "Tor exit-node legitimacy checker", "blue"),
+                ("7", "Homograph Analyzer", "IDN homograph & punycode spoof detector", "blue"),
+                ("8", "Return to Main Directory", "Exit directory and reload the system core", "blue"),
+            ],
+            "cyan",
+            "02",
+        )
 
     @staticmethod
     def display_utilities_menu():
         """Submenu for local system logs, encryption structures, and documentation blueprints."""
-        print(f"{Colors.GREEN}[SUB-DIRECTORY 03 // LOCAL DATA TRAFFIC, SECURITY AUDITS & UTILITIES]{Colors.RESET}\n")
-        print("  [1] Inbound Network Packet Monitor Engine (Requires Admin Context)")
-        print("  [2] Local Directory Source Code 'Secret & Private Key' Leak Scanner")
-        print("  [3] Cryptographic Hash Signatures Matrix Generation & Token Analyzer")
-        print("  [4] Advanced Local Host Operating System Telemetry Profiler")
-        print("  [5] Base64 Cryptographic Processing Matrix (Data Transformation)")
-        print("\n" + f"{Colors.CYAN}[NAVIGATION FRAMEWORK]{Colors.RESET}")
-        print("  [6] Return to Main System Directory Core")
-        print(f"\n{Colors.BOLD}{Colors.GREEN}" + "-" * 75 + f"{Colors.RESET}")
+        _render_directory_menu(
+            "SUB-DIRECTORY 03 // LOCAL DATA TRAFFIC, SECURITY AUDITS & UTILITIES",
+            [
+                ("1", "Traffic Monitor", "Inbound packet sniffer & capture engine", "green"),
+                ("2", "Secret Scanner", "Source-code secret & key leak scanner", "green"),
+                ("3", "Hash Matrix", "Cryptographic hash signatures & token analyzer", "green"),
+                ("4", "System Profiler", "Local host OS telemetry profiler", "green"),
+                ("5", "Base64 Matrix", "Encode/decode data-transformation matrix", "green"),
+                ("6", "Return to Main Directory", "Exit directory and reload the system core", "green"),
+            ],
+            "green",
+            "03",
+        )
 
     @staticmethod
     def display_advanced_audits_menu():
         """Submenu for structural file integrity checks and certificate audits."""
-        print(f"{Colors.CYAN}[SUB-DIRECTORY 04 // ADVANCED INFRASTRUCTURE AUDITS & INTEGRITY]{Colors.RESET}\n")
-        print("  [1] Local File Integrity Monitor (FIMS Directory Snapshot Tracker)")
-        print("  [2] SSL/TLS Certificate Expiration & Cipher Suite Auditor")
-        print("  [3] Host Active Network Connection & Listening Port Profiler")
-        print("  [4] Password Complexity & Offline Information Entropy Matrix")
-        print("  [5] Local Network ARP Table Cache Profiler & Duplicate MAC Auditor")
-        print("  [6] CIDR Subnet IPv4 Network Range & Mask Calculator")
-        print("  [7] UPnP SSDP Local LAN Smart Device Discovery Explorer")
-        print("  [8] Local Hosts File DNS Spoofing & Cache Poisoning Auditor")
-        print("  [9] MAC Address OUI Vendor Directory Lookup Engine")
-        print("\n" + f"{Colors.CYAN}[NAVIGATION FRAMEWORK]{Colors.RESET}")
-        print("  [10] Return to Main System Directory Core")
-        print(f"\n{Colors.BOLD}{Colors.CYAN}" + "-" * 80 + f"{Colors.RESET}")
+        _render_directory_menu(
+            "SUB-DIRECTORY 04 // ADVANCED INFRASTRUCTURE AUDITS & INTEGRITY",
+            [
+                ("1", "File Integrity Monitor", "FIMS directory snapshot tracker", "magenta"),
+                ("2", "SSL/TLS Auditor", "Cert expiry & cipher-suite auditor", "magenta"),
+                ("3", "Connection Profiler", "Active listening-port & connection profiler", "magenta"),
+                ("4", "Password Auditor", "Entropy & complexity compliance matrix", "magenta"),
+                ("5", "ARP Profiler", "ARP table cache & duplicate-MAC auditor", "magenta"),
+                ("6", "CIDR Calculator", "IPv4 subnet range & mask calculator", "magenta"),
+                ("7", "UPnP Discovery", "SSDP smart-device explorer", "magenta"),
+                ("8", "DNS Spoof Auditor", "Hosts-file poisoning & cache audit", "magenta"),
+                ("9", "MAC Vendor Lookup", "OUI manufacturer vendor directory", "magenta"),
+                ("10", "Return to Main Directory", "Exit directory and reload the system core", "magenta"),
+            ],
+            "magenta",
+            "04",
+        )
 
     @staticmethod
     def display_attack_menu():
         """Submenu for attack vectors, exploit frameworks, and defensive auditing verification tools."""
-        print(f"{Colors.RED}[SUB-DIRECTORY 05 // ATTACK VECTORS, EXPLOIT FRAMEWORKS & DEFENSIVE AUDITING]{Colors.RESET}\n")
-        print("  [1] Beast Mode (DDoS)")
-        print("  [2] Image Logger")
-        print("  [3] Brute Force")
-        print("  [4] Metasploit Framework Console Interface (msfconsole)")
-        print("  [5] Msfvenom Network Egress Verification Tool (msfvenom)")
-        print("  [6] Hashcat Password-Strength Compliance Auditor (hashcat)")
-        print("  [7] Impacket Administrative Remoting Suite (psexec.py / wmiexec.py)")
-        print("  [8] Real-Time Security Log Diagnostic Module")
-        print("  [9] Nmap Advanced Port Scanner & Service Profiler")
-        print("\n" + f"{Colors.CYAN}[NAVIGATION FRAMEWORK]{Colors.RESET}")
-        print("  [10] Return to Main System Directory Core")
-        print(f"\n{Colors.BOLD}{Colors.RED}" + "-" * 80 + f"{Colors.RESET}")
+        _render_directory_menu(
+            "SUB-DIRECTORY 05 // ATTACK VECTORS, EXPLOIT FRAMEWORKS & DEFENSIVE AUDITING",
+            [
+                ("1", "Beast Mode (DDoS)", "Distributed denial-of-service launcher", "red"),
+                ("2", "Image Logger", "Malicious-image payload logger", "red"),
+                ("3", "Brute Force", "Credential brute-force engine", "red"),
+                ("4", "Metasploit Console", "msfconsole exploit-framework interface", "red"),
+                ("5", "Msfvenom Egress", "Payload generation & network-egress tester", "red"),
+                ("6", "Hashcat Auditor", "GPU password-strength compliance auditor", "red"),
+                ("7", "Impacket Remoting", "psexec.py / wmiexec.py admin suite", "red"),
+                ("8", "Log Diagnostic", "Real-time security-log diagnostic module", "red"),
+                ("9", "Nmap Scanner", "Advanced port & service profiler", "red"),
+                ("10", "Return to Main Directory", "Exit directory and reload the system core", "red"),
+            ],
+            "red",
+            "05",
+        )
 
 def find_global_command(command_name):
     """
@@ -394,17 +509,20 @@ def find_global_command(command_name):
 
 def title_scrambler_daemon():
     """
-    Background worker loop that dynamically randomizes the active console window title 
-    bar text with high-speed cybernetic matrix sequences natively across OS platforms.
+    Background worker that sets the console window title to the local machine
+    name + online core count, with a high-speed matrix letter scramble for the
+    visual cadence. Replaces the old "MATRIX MONITOR ACTIVE // CORE NODE" text.
     """
     is_windows = sys.platform.startswith('win')
-    base_prefix = "MAINFRAME // MATRIX MONITOR ACTIVE // CORE NODE: "
+    machine_name = platform.node() or "mainframe"
+    cores_online = os.cpu_count() or 1
     matrix_chars = "0123456789ABCDEFLEAKTRACKEDSECX⚡☠️"
-    
+    base_prefix = f"{machine_name} | CORES ONLINE: {cores_online} | "
+
     while True:
-        random_hash = "".join(random.choice(matrix_chars) for _ in range(16))
+        random_hash = "".join(random.choice(matrix_chars) for _ in range(12))
         scrambled_title = f"{base_prefix}[{random_hash}]"
-        
+
         if is_windows:
             try:
                 ctypes.windll.kernel32.SetConsoleTitleW(scrambled_title)
@@ -416,6 +534,7 @@ def title_scrambler_daemon():
                 sys.stderr.flush()
             except Exception:
                 pass
+        time.sleep(0.4)
 
 # ================================================================================
 # SUB-DIRECTORY 01 ENGINE ROUTINES (NETWORK CORES)
@@ -426,18 +545,30 @@ def run_pinger_engine():
     Constructs real-time ICMP requests using the local system shell runtime variables.
     Includes explicit verification filters to eliminate false-positive error logs.
     """
-    print(f"{Colors.CLEAR_SCREEN}{Colors.RED}[WARNING // NETWORK STREAM ENGINE DEPLOYED]{Colors.RESET}")
-    target_host = input(f"{Colors.BOLD}Enter target IP address routing node [Default: 185.220.101.5]: {Colors.RESET}").strip()
+    if ui is not None:
+        ui.clear()
+        ui.panel(
+            RichText.from_markup("[bold red]NETWORK STREAM ENGINE DEPLOYED[/bold red]\n[yellow]Continuous ICMP echo latency monitor[/yellow]"),
+            title="WARNING", border_style="red")
+    else:
+        print(f"{Colors.CLEAR_SCREEN}{Colors.RED}[WARNING // NETWORK STREAM ENGINE DEPLOYED]{Colors.RESET}")
+    
+    target_host = (ui.prompt_input("Enter target IP address [Default: 185.220.101.5]:", "185.220.101.5")
+                   if ui is not None
+                   else input(f"{Colors.BOLD}Enter target IP address routing node [Default: 185.220.101.5]: {Colors.RESET}").strip())
     if not target_host:
         target_host = "185.220.101.5"
     
-    print(f"\n{Colors.CYAN}Spawning native network shell utility. Tap Ctrl+C to trigger interrupt signal...{Colors.RESET}\n")
+    if ui is not None:
+        ui.info("Spawning native network shell utility. Tap Ctrl+C to interrupt...")
+    else:
+        print(f"\n{Colors.CYAN}Spawning native network shell utility. Tap Ctrl+C to trigger interrupt signal...{Colors.RESET}\n")
     time.sleep(1)
 
     is_windows = sys.platform.startswith('win')
     cmd_args = ['ping', '-n', '1', '-w', '1000', target_host] if is_windows else ['ping', '-c', '1', '-W', '1', target_host]
 
-    colors_list = [Colors.RED, Colors.AMBER, Colors.GREEN, Colors.CYAN]
+    colors_list = ["red", "yellow", "green", "cyan"]
     idx = 0
     
     try:
@@ -446,7 +577,7 @@ def run_pinger_engine():
             process = subprocess.run(cmd_args, capture_output=True, text=True)
             duration_ms = int((time.time() - start_time) * 1000)
             
-            chosen_color = colors_list[idx % len(colors_list)]
+            color_name = colors_list[idx % len(colors_list)]
             out = process.stdout.lower()
             
             if process.returncode == 0 and ("ttl=" in out or "time=" in out) and "unreachable" not in out and "timed out" not in out:
@@ -461,61 +592,114 @@ def run_pinger_engine():
                         latency_str = f"~{duration_ms}ms"
                 else:
                     latency_str = f"~{duration_ms}ms"
-                
-                print(f"{chosen_color}{target_host} ➔ {latency_str} // ECHO_SUCCESS_ACK{Colors.RESET}")
+
+                if ui is not None:
+                    from rich.text import Text as _Text
+                    row = _Text()
+                    row.append("  \u25cf ", style=color_name)
+                    row.append(f"{target_host} \u2192 ", style="bold white")
+                    row.append(f"{latency_str}", style=color_name)
+                    row.append("  [OK]", style="green")
+                    ui.console.print(row)
+                else:
+                    print(f"{Colors.RED}{target_host} ➔ {latency_str} // ECHO_SUCCESS_ACK{Colors.RESET}")
             else:
-                print(f"{Colors.RED}{target_host} ➔ TIMEOUT or DROPPED FRAME{Colors.RESET}")
+                if ui is not None:
+                    ui.error(f"{target_host} \u2192 TIMEOUT / DROPPED FRAME")
+                else:
+                    print(f"{Colors.RED}{target_host} ➔ TIMEOUT or DROPPED FRAME{Colors.RESET}")
             
             idx += 1
             time.sleep(0.4)
             
     except KeyboardInterrupt:
-        print(f"\n\n{Colors.AMBER}[STREAM STOP SIGNAL LOGGED // CONSOLE CACHE RECOVERED]{Colors.RESET}")
+        if ui is not None:
+            ui.warning("Stream stop signal logged. Console cache recovered.")
+        else:
+            print(f"\n\n{Colors.AMBER}[STREAM STOP SIGNAL LOGGED // CONSOLE CACHE RECOVERED]{Colors.RESET}")
         time.sleep(1.5)
 
 def run_reverse_dns():
     """Queries active name server structures to trace IP pointer (PTR) records."""
-    print(f"\n{Colors.AMBER}[MODULE 02 // REVERSE DNS INFRASTRUCTURE RESOLVER]{Colors.RESET}")
-    print("Performs lookups against pointer distribution files to track host allocation layers.")
-    target_ip = input("\nEnter target IP address to query: ").strip()
+    if ui is not None:
+        ui.section("MODULE 02 // REVERSE DNS INFRASTRUCTURE RESOLVER", "cyan",
+                   subtitle="Performs lookups against pointer distribution files to track host allocation layers.")
+    else:
+        print(f"\n{Colors.AMBER}[MODULE 02 // REVERSE DNS INFRASTRUCTURE RESOLVER]{Colors.RESET}")
+        print("Performs lookups against pointer distribution files to track host allocation layers.")
+
+    target_ip = (ui.prompt_input("Enter target IP address to query:")
+                 if ui is not None
+                 else input("\nEnter target IP address to query: ").strip())
     if not target_ip:
         return
         
-    print(f"\n{Colors.GREEN}Initiating socket gethostbyaddr handshake sequence...{Colors.RESET}")
+    if ui is not None:
+        ui.info("Initiating socket gethostbyaddr handshake sequence...")
+    else:
+        print(f"\n{Colors.GREEN}Initiating socket gethostbyaddr handshake sequence...{Colors.RESET}")
     time.sleep(0.5)
     
     try:
         hostname, alias_list, ip_list = socket.gethostbyaddr(target_ip)
-        print(f"\n{Colors.GREEN}[✓] RESOLUTION SUCCESSFUL // PTR DISCOVERED{Colors.RESET}")
-        print("-" * 75)
-        print(f"  ➔ Hostname   : {Colors.CYAN}{hostname}{Colors.RESET}")
-        print(f"  ➔ Aliases    : {alias_list}")
-        print(f"  ➔ Interfaces : {ip_list}")
+        if ui is not None:
+            ui.result_table("RESOLUTION SUCCESSFUL — PTR DISCOVERED",
+                            ["FIELD", "VALUE"],
+                            [
+                                ("Hostname", hostname),
+                                ("Aliases", ", ".join(alias_list) if alias_list else "N/A"),
+                                ("Interfaces", ", ".join(ip_list)),
+                            ], border_style="green")
+        else:
+            print(f"\n{Colors.GREEN}[✓] RESOLUTION SUCCESSFUL // PTR DISCOVERED{Colors.RESET}")
+            print("-" * 75)
+            print(f"  ➔ Hostname   : {Colors.CYAN}{hostname}{Colors.RESET}")
+            print(f"  ➔ Aliases    : {alias_list}")
+            print(f"  ➔ Interfaces : {ip_list}")
     except socket.herror:
-        print(f"\n{Colors.RED}[!] Host Resolution Miss: No valid reverse name pointers exist for this location.{Colors.RESET}")
+        if ui is not None:
+            ui.error("Host Resolution Miss: No valid reverse name pointers exist for this location.")
+        else:
+            print(f"\n{Colors.RED}[!] Host Resolution Miss: No valid reverse name pointers exist for this location.{Colors.RESET}")
     except Exception as err:
-        print(f"\n{Colors.RED}[!] Network Mapping Exception Logged: {err}{Colors.RESET}")
+        if ui is not None:
+            ui.error(f"Network Mapping Exception Logged: {err}")
+        else:
+            print(f"\n{Colors.RED}[!] Network Mapping Exception Logged: {err}{Colors.RESET}")
         
-    print("-" * 75)
-    input(f"\nModule matrix complete. Press Enter to pull up directory layout...")
+    if ui is not None:
+        ui.pause("Press Enter to return to menu")
+    else:
+        input(f"\nModule matrix complete. Press Enter to pull up directory layout...")
 
 def run_port_scanner():
     """Launches rapid asynchronous connections across ports and profiles vulnerabilities/hardening vectors."""
-    print(f"\n{Colors.AMBER}[MODULE 03 // MULTI-THREADED PORT SCANNER & VULNERABILITY PROFILER]{Colors.RESET}")
-    target = input("Enter target domain identifier or IP node: ").strip()
+    if ui is not None:
+        ui.section("MODULE 03 // MULTI-THREADED PORT SCANNER & VULNERABILITY PROFILER", "cyan")
+    else:
+        print(f"\n{Colors.AMBER}[MODULE 03 // MULTI-THREADED PORT SCANNER & VULNERABILITY PROFILER]{Colors.RESET}")
+    target = (ui.prompt_input("Enter target domain or IP node:") if ui is not None else input("Enter target domain identifier or IP node: ").strip())
     if not target:
         return
         
-    print(f"\n{Colors.GREEN}Resolving lookup records against root nameservers...{Colors.RESET}")
+    if ui is not None:
+        ui.info("Resolving lookup records against root nameservers...")
+    else:
+        print(f"\n{Colors.GREEN}Resolving lookup records against root nameservers...{Colors.RESET}")
     try:
         target_ip = socket.gethostbyname(target)
-        print(f"Target Identity Bound: {Colors.CYAN}{target_ip}{Colors.RESET}\n")
+        if ui is not None:
+            ui.info(f"Target Identity Bound: {target_ip}")
+        else:
+            print(f"Target Identity Bound: {Colors.CYAN}{target_ip}{Colors.RESET}\n")
     except Exception as e:
-        print(f"{Colors.RED}[!] Failed to resolve server destination mapping: {e}{Colors.RESET}")
+        if ui is not None:
+            ui.error(f"Failed to resolve server destination mapping: {e}")
+        else:
+            print(f"{Colors.RED}[!] Failed to resolve server destination mapping: {e}{Colors.RESET}")
         input("\nPress Enter to return...")
         return
 
-    # Configuration database mapping common services to audit/defense context parameters
     port_hardening_db = {
         21: ("FTP", "Plaintext credentials exchange. Audit for anonymous logins or transition to SFTP/FTPS."),
         22: ("SSH", "Secure Shell interface. Verify key-based authentication is enforced and root login is deactivated."),
@@ -535,8 +719,15 @@ def run_port_scanner():
         8443: ("HTTPS-Alt", "Alternative secure server administration access dashboard. Restrict via strict ACL configurations.")
     }
 
-    print(f"{Colors.BOLD}{'INTERFACE':<12}{'SERVICE':<16}{'STATUS':<12}{'DEFENSIVE PROFILING ARCHIVE'}{Colors.RESET}")
-    print("-" * 110)
+    if ui is not None:
+        scan_table = Table(title="PORT SCAN RESULTS", border_style="cyan", header_style="bold cyan", box=ROUNDED)
+        scan_table.add_column("PORT", style="bold", width=10)
+        scan_table.add_column("SERVICE", style="cyan", width=18)
+        scan_table.add_column("STATUS", width=12)
+        scan_table.add_column("DEFENSIVE PROFILING", ratio=1)
+    else:
+        print(f"{Colors.BOLD}{'INTERFACE':<12}{'SERVICE':<16}{'STATUS':<12}{'DEFENSIVE PROFILING ARCHIVE'}{Colors.RESET}")
+        print("-" * 110)
 
     print_lock = threading.Lock()
 
@@ -548,7 +739,10 @@ def run_port_scanner():
             if result == 0:
                 service_meta = port_hardening_db.get(port, ("unknown", "No supplementary baseline audit records compiled."))
                 with print_lock:
-                    print(f"{Colors.GREEN}Port {port:<8}{service_meta[0]:<16}{'OPEN':<12}{Colors.RESET}{Colors.AMBER}{service_meta[1]}{Colors.RESET}")
+                    if ui is not None:
+                        scan_table.add_row(str(port), service_meta[0], "[green]OPEN[/green]", service_meta[1])
+                    else:
+                        print(f"{Colors.GREEN}Port {port:<8}{service_meta[0]:<16}{'OPEN':<12}{Colors.RESET}{Colors.AMBER}{service_meta[1]}{Colors.RESET}")
             s.close()
         except Exception:
             pass
@@ -556,56 +750,97 @@ def run_port_scanner():
     with ThreadPoolExecutor(max_workers=30) as executor:
         executor.map(scan_port, sorted(port_hardening_db.keys()))
 
-    print("-" * 110)
-    input(f"\nScan operations sequence terminated. Press Enter to resume...")
+    if ui is not None:
+        ui.console.print()
+        ui.console.print(scan_table)
+        ui.console.print()
+    else:
+        print("-" * 110)
+    if ui is not None:
+        ui.pause("Press Enter to resume")
+    else:
+        input(f"\nScan operations sequence terminated. Press Enter to resume...")
 
 def run_ping_sweeper():
     """Launches parallel ICMP echo checks across the local subnet spectrum."""
-    print(f"\n{Colors.AMBER}[MODULE 04 // LOCAL SUBNET PARALLEL PING SWEEPER]{Colors.RESET}")
+    if ui is not None:
+        ui.section("MODULE 04 // LOCAL SUBNET PARALLEL PING SWEEPER", "cyan")
+    else:
+        print(f"\n{Colors.AMBER}[MODULE 04 // LOCAL SUBNET PARALLEL PING SWEEPER]{Colors.RESET}")
     try:
         local_ip = socket.gethostbyname(socket.gethostname())
         default_subnet = ".".join(local_ip.split('.')[:3])
     except Exception:
         default_subnet = "192.168.1"
 
-    subnet = input(f"Enter target local subnet prefix [Default: {default_subnet}]: ").strip() or default_subnet
-    print(f"\n{Colors.CYAN}Initializing thread pools for network matrix {subnet}.1 to {subnet}.254...{Colors.RESET}\n")
+    subnet = (ui.prompt_input(f"Enter target local subnet prefix [Default: {default_subnet}]:", default_subnet)
+              if ui is not None
+              else (input(f"Enter target local subnet prefix [Default: {default_subnet}]: ").strip() or default_subnet))
+    if ui is not None:
+        ui.info(f"Initializing thread pools for network scan {subnet}.1 to {subnet}.254...")
+    else:
+        print(f"\n{Colors.CYAN}Initializing thread pools for network matrix {subnet}.1 to {subnet}.254...{Colors.RESET}\n")
     
     is_windows = sys.platform.startswith('win')
     cmd_base = ['ping', '-n', '1', '-w', '400'] if is_windows else ['ping', '-c', '1', '-W', '1']
 
-    print(f"{Colors.BOLD}{'IP ADDRESS':<22}{'METRIC STATUS'}{Colors.RESET}")
-    print("-" * 45)
+    if ui is not None:
+        sweep_table = Table(title="SUBNET SWEEP RESULTS", border_style="cyan", header_style="bold cyan", box=ROUNDED)
+        sweep_table.add_column("IP ADDRESS", style="bold", width=20)
+        sweep_table.add_column("METRIC STATUS", style="green", width=25)
+    else:
+        print(f"{Colors.BOLD}{'IP ADDRESS':<22}{'METRIC STATUS'}{Colors.RESET}")
+        print("-" * 45)
+
+    print_lock = threading.Lock()
 
     def check_host(i):
         ip = f"{subnet}.{i}"
         try:
             if subprocess.run(cmd_base + [ip], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode == 0:
-                print(f"{Colors.GREEN}{ip:<22}[ RESPONSIVE DEVICE ONLINE ]{Colors.RESET}")
+                with print_lock:
+                    if ui is not None:
+                        sweep_table.add_row(ip, "[green]RESPONSIVE DEVICE ONLINE[/green]")
+                    else:
+                        print(f"{Colors.GREEN}{ip:<22}[ RESPONSIVE DEVICE ONLINE ]{Colors.RESET}")
         except Exception:
             pass
 
     with ThreadPoolExecutor(max_workers=35) as executor:
         executor.map(check_host, range(1, 255))
 
-    print("-" * 45)
-    input(f"\nSweep operation complete. Press Enter to exit subsystem layer...")
+    if ui is not None:
+        ui.console.print()
+        ui.console.print(sweep_table)
+        ui.console.print()
+    else:
+        print("-" * 45)
+    if ui is not None:
+        ui.pause("Press Enter to exit subsystem")
+    else:
+        input(f"\nSweep operation complete. Press Enter to exit subsystem layer...")
 
 def run_banner_grabber():
     """Intercepts server banner configurations by establishing direct TCP connections."""
-    print(f"\n{Colors.AMBER}[MODULE 05 // NETWORK SERVICE BANNER GRABBER AUDITOR]{Colors.RESET}")
-    target = input("Enter target server domain or address block: ").strip()
+    if ui is not None:
+        ui.section("MODULE 05 // NETWORK SERVICE BANNER GRABBER AUDITOR", "cyan")
+    else:
+        print(f"\n{Colors.AMBER}[MODULE 05 // NETWORK SERVICE BANNER GRABBER AUDITOR]{Colors.RESET}")
+    target = (ui.prompt_input("Enter target server domain or address block:") if ui is not None else input("Enter target server domain or address block: ").strip())
     if not target:
         return
-    port_input = input("Enter operational application port (e.g., 21, 22, 80): ").strip()
+    port_input = (ui.prompt_input("Enter operational application port (e.g., 21, 22, 80):") if ui is not None else input("Enter operational application port (e.g., 21, 22, 80): ").strip())
     try:
         port = int(port_input)
     except ValueError:
-        print(f"{Colors.RED}[!] Format Check Exception: Target port must be a numerical value.{Colors.RESET}")
+        ui.error("Format Check Exception: Target port must be a numerical value.") if ui else print(f"{Colors.RED}[!] Format Check Exception: Target port must be a numerical value.{Colors.RESET}")
         time.sleep(1.2)
         return
 
-    print(f"\n{Colors.GREEN}Opening socket connection pipeline to {target}:{port}...{Colors.RESET}")
+    if ui is not None:
+        ui.info(f"Opening socket connection pipeline to {target}:{port}...")
+    else:
+        print(f"\n{Colors.GREEN}Opening socket connection pipeline to {target}:{port}...{Colors.RESET}")
     try:
         s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         s.settimeout(3.5)
@@ -617,23 +852,37 @@ def run_banner_grabber():
         banner = s.recv(1024)
         s.close()
         
-        print(f"\n{Colors.GREEN}[✓] REMOTE DATA CAPTURED // SOFTWARE RECORD ANCHOR{Colors.RESET}\n")
-        print("-" * 75)
-        print(banner.decode('utf-8', errors='ignore').strip())
+        if ui is not None:
+            ui.panel(banner.decode('utf-8', errors='ignore').strip(),
+                     title="REMOTE DATA CAPTURED", border_style="green", box_style=ROUNDED, padding=(1, 2))
+        else:
+            print(f"\n{Colors.GREEN}[✓] REMOTE DATA CAPTURED // SOFTWARE RECORD ANCHOR{Colors.RESET}\n")
+            print("-" * 75)
+            print(banner.decode('utf-8', errors='ignore').strip())
     except Exception as e:
-        print(f"\n{Colors.RED}[!] Pipeline Dropped: Stream handshake interface rejected: {e}{Colors.RESET}")
+        ui.error(f"Pipeline Dropped: Stream handshake interface rejected: {e}") if ui else print(f"\n{Colors.RED}[!] Pipeline Dropped: Stream handshake interface rejected: {e}{Colors.RESET}")
         
-    print("-" * 75)
-    input(f"\nPress Enter to return to menu directory structure...")
+    if ui is not None:
+        ui.pause("Press Enter to return")
+    else:
+        input(f"\nPress Enter to return to menu directory structure...")
 
 def run_subdomain_finder():
     """Crawls crt.sh passively to isolate exposed subdomains without generating target alerts."""
-    print(f"\n{Colors.AMBER}[MODULE 07 // PASSIVE DOMAIN SUBDOMAIN FINDER]{Colors.RESET}")
-    target_root = input("\nEnter target parent root domain (e.g., corporate.com): ").strip()
+    if ui is not None:
+        ui.section("MODULE 07 // PASSIVE DOMAIN SUBDOMAIN FINDER", "cyan")
+    else:
+        print(f"\n{Colors.AMBER}[MODULE 07 // PASSIVE DOMAIN SUBDOMAIN FINDER]{Colors.RESET}")
+    target_root = (ui.prompt_input("Enter target parent root domain (e.g., corporate.com):")
+                   if ui is not None
+                   else input("\nEnter target parent root domain (e.g., corporate.com): ").strip())
     if not target_root:
         return
         
-    print(f"\n{Colors.GREEN}Opening stream to transparency certificate logs database endpoint...{Colors.RESET}")
+    if ui is not None:
+        ui.info("Opening stream to transparency certificate logs database endpoint...")
+    else:
+        print(f"\n{Colors.GREEN}Opening stream to transparency certificate logs database endpoint...{Colors.RESET}")
     url = f"https://crt.sh/?q={target_root}&output=json"
     req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'})
     
@@ -650,23 +899,41 @@ def run_subdomain_finder():
                         split_node = split_node.strip().lower()
                         if split_node.endswith(target_root) and "*" not in split_node:
                             isolated_subs.add(split_node)
-                            
-                print(f"\n{Colors.GREEN}[✓] PASSIVE DISCOVERY RECON LOG INDEX ({len(isolated_subs)} ENTRIES TRACKED){Colors.RESET}")
-                print("-" * 75)
-                for subdomain in sorted(isolated_subs):
-                    print(f"  ➔ Verified Subdomain Host: {Colors.CYAN}{subdomain}{Colors.RESET}")
+                
+                if ui is not None:
+                    sub_table = Table(title=f"DISCOVERED SUBDOMAINS ({len(isolated_subs)})",
+                                      border_style="green", header_style="bold green", box=ROUNDED)
+                    sub_table.add_column("#", style="dim", width=5)
+                    sub_table.add_column("SUBDOMAIN", style="cyan", ratio=1)
+                    for i, subdomain in enumerate(sorted(isolated_subs), 1):
+                        sub_table.add_row(str(i), subdomain)
+                    ui.console.print()
+                    ui.console.print(sub_table)
+                    ui.console.print()
+                else:
+                    print(f"\n{Colors.GREEN}[✓] PASSIVE DISCOVERY RECON LOG INDEX ({len(isolated_subs)} ENTRIES TRACKED){Colors.RESET}")
+                    print("-" * 75)
+                    for subdomain in sorted(isolated_subs):
+                        print(f"  ➔ Verified Subdomain Host: {Colors.CYAN}{subdomain}{Colors.RESET}")
             else:
-                print(f"{Colors.RED}[!] Server Connection Error: Server dropped protocol flag HTTP {response.status}{Colors.RESET}")
+                ui.error(f"Server Connection Error: Server dropped protocol flag HTTP {response.status}") if ui else print(f"{Colors.RED}[!] Server Connection Error: Server dropped protocol flag HTTP {response.status}{Colors.RESET}")
     except Exception as e:
-        print(f"\n{Colors.RED}[!] External Index Disconnected: Registry logs unreadable or stream timeout: {e}{Colors.RESET}")
+        ui.error(f"External Index Disconnected: Registry logs unreadable or stream timeout: {e}") if ui else print(f"\n{Colors.RED}[!] External Index Disconnected: Registry logs unreadable or stream timeout: {e}{Colors.RESET}")
         
-    print("-" * 75)
-    input(f"\nProcessing complete. Press Enter to drop layout cache...")
+    if ui is not None:
+        ui.pause("Press Enter to return")
+    else:
+        input(f"\nProcessing complete. Press Enter to drop layout cache...")
 
 def run_rdap_lookup():
     """Maps autonomous network ranges and registrar details using the global RDAP architecture."""
-    print(f"\n{Colors.AMBER}[MODULE 08 // ADVANCED RDAP REGISTRATION INFRASTRUCTURE MAPPER]{Colors.RESET}")
-    target_input = input("Enter target system IP address or domain path: ").strip()
+    if ui is not None:
+        ui.section("MODULE 08 // ADVANCED RDAP REGISTRATION INFRASTRUCTURE MAPPER", "cyan")
+    else:
+        print(f"\n{Colors.AMBER}[MODULE 08 // ADVANCED RDAP REGISTRATION INFRASTRUCTURE MAPPER]{Colors.RESET}")
+    target_input = (ui.prompt_input("Enter target system IP address or domain path:")
+                    if ui is not None
+                    else input("Enter target system IP address or domain path: ").strip())
     if not target_input:
         return
         
@@ -677,17 +944,26 @@ def run_rdap_lookup():
         is_raw_ip = False
         
     if not is_raw_ip:
-        print(f"{Colors.GREEN}Resolving domain target to network routing address...{Colors.RESET}")
+        if ui is not None:
+            ui.info("Resolving domain target to network routing address...")
+        else:
+            print(f"{Colors.GREEN}Resolving domain target to network routing address...{Colors.RESET}")
         try:
             lookup_ip = socket.gethostbyname(target_input)
-            print(f"Domain mapped to routing coordinate: {Colors.CYAN}{lookup_ip}{Colors.RESET}")
+            if ui is not None:
+                ui.info(f"Domain mapped to routing coordinate: {lookup_ip}")
+            else:
+                print(f"Domain mapped to routing coordinate: {Colors.CYAN}{lookup_ip}{Colors.RESET}")
         except Exception as e:
-            print(f"{Colors.RED}[!] Error tracking domain mapping: {e}. Attempting direct query format...{Colors.RESET}")
+            ui.warning(f"Error tracking domain mapping: {e}. Attempting direct query format...") if ui else print(f"{Colors.RED}[!] Error tracking domain mapping: {e}. Attempting direct query format...{Colors.RESET}")
             lookup_ip = target_input
     else:
         lookup_ip = target_input
 
-    print(f"\n{Colors.GREEN}Sending configuration request packet array to RDAP name registries...{Colors.RESET}")
+    if ui is not None:
+        ui.info("Sending configuration request packet array to RDAP name registries...")
+    else:
+        print(f"\n{Colors.GREEN}Sending configuration request packet array to RDAP name registries...{Colors.RESET}")
     url = f"https://rdap.org/ip/{lookup_ip}"
     req = urllib.request.Request(url, headers={'User-Agent': 'Mainframe-Terminal-Multitool'})
     
@@ -696,11 +972,11 @@ def run_rdap_lookup():
             raw_data = response.read().decode('utf-8')
             parsed_records = json.loads(raw_data)
             
-            print(f"\n{Colors.GREEN}[✓] PRODUCTION INFRASTRUCTURE METRIC DATA BLOCKS{Colors.RESET}")
-            print("-" * 75)
-            print(f"  ➔ Primary Entity Identifier : {Colors.CYAN}{parsed_records.get('name', 'UNKNOWN')}{Colors.RESET}")
-            print(f"  ➔ Assigned Allocation Block : {parsed_records.get('startAddress', 'N/A')} - {parsed_records.get('endAddress', 'N/A')}")
-            print(f"  ➔ Registered Country Code   : {parsed_records.get('country', 'UNKNOWN')}")
+            rdap_data = [
+                ("Primary Entity Identifier", parsed_records.get('name', 'UNKNOWN')),
+                ("Assigned Allocation Block", f"{parsed_records.get('startAddress', 'N/A')} - {parsed_records.get('endAddress', 'N/A')}"),
+                ("Registered Country Code", parsed_records.get('country', 'UNKNOWN')),
+            ]
             
             entities = parsed_records.get('entities', [])
             if entities:
@@ -708,24 +984,55 @@ def run_rdap_lookup():
                 if len(vcard) > 1:
                     for element in vcard[1]:
                         if element[0] == 'fn':
-                            print(f"  ➔ Administrative Provider  : {Colors.AMBER}{element[3]}{Colors.RESET}")
+                            rdap_data.append(("Administrative Provider", element[3]))
+            
+            if ui is not None:
+                ui.result_table("PRODUCTION INFRASTRUCTURE METRIC DATA BLOCKS",
+                                ["FIELD", "VALUE"], rdap_data, border_style="green")
+            else:
+                print(f"\n{Colors.GREEN}[✓] PRODUCTION INFRASTRUCTURE METRIC DATA BLOCKS{Colors.RESET}")
+                print("-" * 75)
+                print(f"  ➔ Primary Entity Identifier : {Colors.CYAN}{parsed_records.get('name', 'UNKNOWN')}{Colors.RESET}")
+                print(f"  ➔ Assigned Allocation Block : {parsed_records.get('startAddress', 'N/A')} - {parsed_records.get('endAddress', 'N/A')}")
+                print(f"  ➔ Registered Country Code   : {parsed_records.get('country', 'UNKNOWN')}")
+            
+                entities = parsed_records.get('entities', [])
+                if entities:
+                    vcard = entities[0].get('vcardArray', [])
+                    if len(vcard) > 1:
+                        for element in vcard[1]:
+                            if element[0] == 'fn':
+                                print(f"  ➔ Administrative Provider  : {Colors.AMBER}{element[3]}{Colors.RESET}")
     except Exception as err:
-        print(f"\n{Colors.RED}[!] Registry Allocation Block Record Missing or Timeout: {err}{Colors.RESET}")
+        if ui is not None:
+            ui.error(f"Registry Allocation Block Record Missing or Timeout: {err}")
+        else:
+            print(f"\n{Colors.RED}[!] Registry Allocation Block Record Missing or Timeout: {err}{Colors.RESET}")
         
-    print("-" * 75)
-    input(f"\nModule pipeline sequence finished. Press Enter to navigate back to choices...")
+    if ui is not None:
+        ui.pause("Press Enter to return")
+    else:
+        input(f"\nModule pipeline sequence finished. Press Enter to navigate back to choices...")
 
 def run_http_header_auditor():
     """Queries a remote server to audit security-relevant HTTP defense headers."""
-    print(f"\n{Colors.AMBER}[MODULE 09 // HTTP HEADER SECURITY COMPLIANCE & HARDENING AUDITOR]{Colors.RESET}")
-    target_url = input("Enter target domain or URL (e.g., example.com): ").strip()
+    if ui is not None:
+        ui.section("MODULE 09 // HTTP HEADER SECURITY COMPLIANCE & HARDENING AUDITOR", "cyan")
+    else:
+        print(f"\n{Colors.AMBER}[MODULE 09 // HTTP HEADER SECURITY COMPLIANCE & HARDENING AUDITOR]{Colors.RESET}")
+    target_url = (ui.prompt_input("Enter target domain or URL (e.g., example.com):")
+                  if ui is not None
+                  else input("Enter target domain or URL (e.g., example.com): ").strip())
     if not target_url:
         return
         
     if not target_url.startswith("http://") and not target_url.startswith("https://"):
         target_url = "https://" + target_url
         
-    print(f"\n{Colors.GREEN}Sending connection handshake request to analyze header configurations...{Colors.RESET}")
+    if ui is not None:
+        ui.info("Sending connection handshake request to analyze header configurations...")
+    else:
+        print(f"\n{Colors.GREEN}Sending connection handshake request to analyze header configurations...{Colors.RESET}")
     req = urllib.request.Request(target_url, headers={'User-Agent': 'Mainframe-Terminal-Multitool-Auditor'})
     try:
         with urllib.request.urlopen(req, timeout=10) as response:
@@ -739,38 +1046,82 @@ def run_http_header_auditor():
                 "X-XSS-Protection": "Legacy cross-site scripting filter context mechanism. Often replaced by standard CSP rules."
             }
             
-            print(f"\n{Colors.GREEN}[✓] SECURITY COMPLIANCE TELEMETRY REPORT{Colors.RESET}")
-            print("-" * 90)
-            print(f"{Colors.BOLD}{'AUDITED SECURITY HEADER':<30}{'STATUS':<15}{'CORE MITIGATION PURPOSE'}{Colors.RESET}")
-            print("-" * 90)
-            
-            for header, purpose in security_headers.items():
-                value = headers.get(header)
-                if value:
-                    print(f"{Colors.GREEN}{header:<30}{'PRESENT':<15}{Colors.RESET}{Colors.CYAN}{purpose}{Colors.RESET}")
-                    print(f"  └─ Configured Value: {Colors.AMBER}{value}{Colors.RESET}")
-                else:
-                    print(f"{Colors.RED}{header:<30}{'MISSING':<15}{Colors.RESET}{Colors.RED}{purpose}{Colors.RESET}")
+            if ui is not None:
+                hdr_table = Table(title="SECURITY COMPLIANCE TELEMETRY REPORT",
+                                  border_style="green", header_style="bold green", box=ROUNDED)
+                hdr_table.add_column("SECURITY HEADER", style="bold", width=30)
+                hdr_table.add_column("STATUS", width=12)
+                hdr_table.add_column("MITIGATION PURPOSE", ratio=1)
+                hdr_table.add_column("CONFIGURED VALUE", ratio=1)
+                
+                for header, purpose in security_headers.items():
+                    value = headers.get(header)
+                    if value:
+                        hdr_table.add_row(header, "[green]PRESENT[/green]", purpose, str(value))
+                    else:
+                        hdr_table.add_row(header, "[red]MISSING[/red]", purpose, "N/A")
+                ui.console.print()
+                ui.console.print(hdr_table)
+                ui.console.print()
+            else:
+                print(f"\n{Colors.GREEN}[✓] SECURITY COMPLIANCE TELEMETRY REPORT{Colors.RESET}")
+                print("-" * 90)
+                print(f"{Colors.BOLD}{'AUDITED SECURITY HEADER':<30}{'STATUS':<15}{'CORE MITIGATION PURPOSE'}{Colors.RESET}")
+                print("-" * 90)
+                
+                for header, purpose in security_headers.items():
+                    value = headers.get(header)
+                    if value:
+                        print(f"{Colors.GREEN}{header:<30}{'PRESENT':<15}{Colors.RESET}{Colors.CYAN}{purpose}{Colors.RESET}")
+                        print(f"  └─ Configured Value: {Colors.AMBER}{value}{Colors.RESET}")
+                    else:
+                        print(f"{Colors.RED}{header:<30}{'MISSING':<15}{Colors.RESET}{Colors.RED}{purpose}{Colors.RESET}")
     except Exception as e:
-        print(f"\n{Colors.RED}[!] Failed to complete HTTP connection stream context audit: {e}{Colors.RESET}")
+        if ui is not None:
+            ui.error(f"Failed to complete HTTP connection stream context audit: {e}")
+        else:
+            print(f"\n{Colors.RED}[!] Failed to complete HTTP connection stream context audit: {e}{Colors.RESET}")
         
-    print("-" * 90)
-    input(f"\nAudit operations complete. Press Enter to load submenu options...")
+    if ui is not None:
+        ui.pause("Press Enter to return")
+    else:
+        input(f"\nAudit operations complete. Press Enter to load submenu options...")
 
 def run_doh_resolver():
     """Queries Cloudflare's public DNS-over-HTTPS json registry endpoint to bypass local network pools."""
-    print(f"\n{Colors.AMBER}[MODULE 10 // DNS-OVER-HTTPS (DOH) CLIENT RESOLVER SUBSYSTEM]{Colors.RESET}")
-    print("Issues secure encrypted name queries over port 443 to Cloudflare public resolvers natively.")
-    target_domain = input("\nEnter domain identifier to resolve (e.g., google.com): ").strip()
+    if ui is not None:
+        ui.section("MODULE 10 // DNS-OVER-HTTPS (DOH) CLIENT RESOLVER SUBSYSTEM", "cyan",
+                   subtitle="Issues secure encrypted name queries over port 443 to Cloudflare public resolvers natively.")
+    else:
+        print(f"\n{Colors.AMBER}[MODULE 10 // DNS-OVER-HTTPS (DOH) CLIENT RESOLVER SUBSYSTEM]{Colors.RESET}")
+        print("Issues secure encrypted name queries over port 443 to Cloudflare public resolvers natively.")
+    target_domain = (ui.prompt_input("Enter domain identifier to resolve (e.g., google.com):")
+                     if ui is not None
+                     else input("\nEnter domain identifier to resolve (e.g., google.com): ").strip())
     if not target_domain:
         return
         
-    print("Select target resource mapping record configuration tracker:")
-    print(" [1] A (Standard IPv4 Address)\n [2] AAAA (Modern IPv6 Address)\n [3] MX (Mail Exchange Server Arrays)\n [4] TXT (Text Verification Nodes)")
-    choice = input("Enter tracking choice (1-4): ").strip()
+    if ui is not None:
+        print_choices = ui
+        from rich.text import Text as _Text
+        _t = _Text()
+        _t.append("Select record type:\n", style="bold")
+        _t.append("  [1] A  (IPv4 Address)\n", style="cyan")
+        _t.append("  [2] AAAA (IPv6 Address)\n", style="cyan")
+        _t.append("  [3] MX (Mail Exchange)\n", style="cyan")
+        _t.append("  [4] TXT (Text Records)", style="cyan")
+        ui.console.print(_t)
+        choice = ui.console.input("[bold yellow]  Enter choice (1-4) [Default: 1]: [/bold yellow]").strip() or "1"
+    else:
+        print("Select target resource mapping record configuration tracker:")
+        print(" [1] A (Standard IPv4 Address)\n [2] AAAA (Modern IPv6 Address)\n [3] MX (Mail Exchange Server Arrays)\n [4] TXT (Text Verification Nodes)")
+        choice = input("Enter tracking choice (1-4): ").strip()
     record_type = {"1": "A", "2": "AAAA", "3": "MX", "4": "TXT"}.get(choice, "A")
     
-    print(f"\n{Colors.GREEN}Dispatching secure encrypted HTTPS GET packet query to cloudflare-dns.com...{Colors.RESET}")
+    if ui is not None:
+        ui.info("Dispatching secure encrypted HTTPS GET packet query to cloudflare-dns.com...")
+    else:
+        print(f"\n{Colors.GREEN}Dispatching secure encrypted HTTPS GET packet query to cloudflare-dns.com...{Colors.RESET}")
     url = f"https://cloudflare-dns.com/dns-query?name={target_domain}&type={record_type}"
     req = urllib.request.Request(url, headers={'Accept': 'application/dns-json', 'User-Agent': 'Mainframe-DoH-Core'})
     
@@ -780,32 +1131,60 @@ def run_doh_resolver():
             parsed_payload = json.loads(raw_data)
             
             status_code = parsed_payload.get("Status", -1)
-            print(f"\n{Colors.GREEN}[✓] ENCRYPTED DO-H RESPONSE SYNCHRONIZED // STATUS: {status_code}{Colors.RESET}")
-            print("-" * 75)
+            if ui is not None:
+                ui.success(f"Encrypted DoH response synchronized // STATUS: {status_code}")
+            else:
+                print(f"\n{Colors.GREEN}[✓] ENCRYPTED DO-H RESPONSE SYNCHRONIZED // STATUS: {status_code}{Colors.RESET}")
             
             answers = parsed_payload.get("Answer", [])
             if answers:
-                print(f"{Colors.BOLD}{'RECORD NAME':<25}{'TYPE':<8}{'TTL':<10}{'RESOLVED DATA MAPPING VALUE'}{Colors.RESET}")
-                print("-" * 75)
-                for entry in answers:
-                    type_id = entry.get("type", -1)
-                    print(f"  {entry.get('name'):<23}{type_id:<8}{entry.get('TTL'):<10}{Colors.CYAN}{entry.get('data')}{Colors.RESET}")
+                if ui is not None:
+                    doh_table = Table(title="DNS RECORDS", border_style="cyan", header_style="bold cyan", box=ROUNDED)
+                    doh_table.add_column("RECORD NAME", style="cyan", width=25)
+                    doh_table.add_column("TYPE", width=8)
+                    doh_table.add_column("TTL", width=12)
+                    doh_table.add_column("DATA", ratio=1)
+                    for entry in answers:
+                        type_id = entry.get("type", -1)
+                        doh_table.add_row(entry.get('name', ''), str(type_id), str(entry.get('TTL', '')), entry.get('data', ''))
+                    ui.console.print()
+                    ui.console.print(doh_table)
+                    ui.console.print()
+                else:
+                    print(f"{Colors.BOLD}{'RECORD NAME':<25}{'TYPE':<8}{'TTL':<10}{'RESOLVED DATA MAPPING VALUE'}{Colors.RESET}")
+                    print("-" * 75)
+                    for entry in answers:
+                        type_id = entry.get("type", -1)
+                        print(f"  {entry.get('name'):<23}{type_id:<8}{entry.get('TTL'):<10}{Colors.CYAN}{entry.get('data')}{Colors.RESET}")
             else:
-                print(f"{Colors.RED}[!] No DNS entries returned inside the encrypted answer payload array.{Colors.RESET}")
+                ui.warning("No DNS entries returned inside the encrypted answer payload array.") if ui else print(f"{Colors.RED}[!] No DNS entries returned inside the encrypted answer payload array.{Colors.RESET}")
     except Exception as e:
-        print(f"\n{Colors.RED}[!] Encryption query dropped: DoH client failed to parse response: {e}{Colors.RESET}")
+        if ui is not None:
+            ui.error(f"Encryption query dropped: DoH client failed to parse response: {e}")
+        else:
+            print(f"\n{Colors.RED}[!] Encryption query dropped: DoH client failed to parse response: {e}{Colors.RESET}")
         
-    print("-" * 75)
-    input(f"\nQuery complete. Press Enter to load submenu options...")
+    if ui is not None:
+        ui.pause("Press Enter to return")
+    else:
+        input(f"\nQuery complete. Press Enter to load submenu options...")
 
 def run_ip_lookup():
     """Looks up IP address geolocation and metadata using ip-api.com."""
-    print(f"\n{Colors.AMBER}[MODULE 11 // IP ADDRESS GEOLOCATION & METADATA LOOKUP]{Colors.RESET}")
-    target_ip = input("\nEnter IP address to lookup: ").strip()
+    if ui is not None:
+        ui.section("MODULE 11 // IP ADDRESS GEOLOCATION & METADATA LOOKUP", "cyan")
+    else:
+        print(f"\n{Colors.AMBER}[MODULE 11 // IP ADDRESS GEOLOCATION & METADATA LOOKUP]{Colors.RESET}")
+    target_ip = (ui.prompt_input("Enter IP address to lookup:")
+                 if ui is not None
+                 else input("\nEnter IP address to lookup: ").strip())
     if not target_ip:
         return
     
-    print(f"\n{Colors.GREEN}Querying ip-api.com for IP metadata...{Colors.RESET}")
+    if ui is not None:
+        ui.info("Querying ip-api.com for IP metadata...")
+    else:
+        print(f"\n{Colors.GREEN}Querying ip-api.com for IP metadata...{Colors.RESET}")
     url = f"http://ip-api.com/json/{target_ip}?fields=status,message,country,countryCode,region,regionName,city,zip,lat,lon,timezone,isp,org,as,reverse,mobile,proxy,hosting"
     req = urllib.request.Request(url, headers={'User-Agent': 'Mainframe-IP-Lookup'})
     
@@ -815,57 +1194,112 @@ def run_ip_lookup():
             parsed = json.loads(raw_data)
             
             if parsed.get("status") == "fail":
-                print(f"\n{Colors.RED}[!] Lookup failed: {parsed.get('message', 'Unknown error')}{Colors.RESET}")
+                if ui is not None:
+                    ui.error(f"Lookup failed: {parsed.get('message', 'Unknown error')}")
+                else:
+                    print(f"\n{Colors.RED}[!] Lookup failed: {parsed.get('message', 'Unknown error')}{Colors.RESET}")
                 input(f"\nPress Enter to load submenu options...")
                 return
             
-            print(f"\n{Colors.GREEN}[✓] IP LOOKUP RESULTS // {target_ip}{Colors.RESET}")
-            print("-" * 75)
-            print(f"{Colors.BOLD}{'FIELD':<20}{'VALUE'}{Colors.RESET}")
-            print("-" * 75)
-            print(f"{'IP Address':<20}{Colors.CYAN}{target_ip}{Colors.RESET}")
-            print(f"{'Country':<20}{Colors.CYAN}{parsed.get('country', 'N/A')}{Colors.RESET}")
-            print(f"{'Country Code':<20}{Colors.CYAN}{parsed.get('countryCode', 'N/A')}{Colors.RESET}")
-            print(f"{'Region':<20}{Colors.CYAN}{parsed.get('regionName', 'N/A')}{Colors.RESET}")
-            print(f"{'City':<20}{Colors.CYAN}{parsed.get('city', 'N/A')}{Colors.RESET}")
-            print(f"{'ZIP Code':<20}{Colors.CYAN}{parsed.get('zip', 'N/A')}{Colors.RESET}")
-            print(f"{'Coordinates':<20}{Colors.CYAN}{parsed.get('lat', 'N/A')}, {parsed.get('lon', 'N/A')}{Colors.RESET}")
-            print(f"{'Timezone':<20}{Colors.CYAN}{parsed.get('timezone', 'N/A')}{Colors.RESET}")
-            print(f"{'ISP':<20}{Colors.CYAN}{parsed.get('isp', 'N/A')}{Colors.RESET}")
-            print(f"{'Organization':<20}{Colors.CYAN}{parsed.get('org', 'N/A')}{Colors.RESET}")
-            print(f"{'AS Number':<20}{Colors.CYAN}{parsed.get('as', 'N/A')}{Colors.RESET}")
-            print(f"{'Reverse DNS':<20}{Colors.CYAN}{parsed.get('reverse', 'N/A')}{Colors.RESET}")
-            print(f"{'Mobile':<20}{Colors.CYAN}{str(parsed.get('mobile', 'N/A'))}{Colors.RESET}")
-            print(f"{'Proxy':<20}{Colors.CYAN}{str(parsed.get('proxy', 'N/A'))}{Colors.RESET}")
-            print(f"{'Hosting':<20}{Colors.CYAN}{str(parsed.get('hosting', 'N/A'))}{Colors.RESET}")
-            print("-" * 75)
+            ip_data = [
+                ("IP Address", target_ip),
+                ("Country", parsed.get('country', 'N/A')),
+                ("Country Code", parsed.get('countryCode', 'N/A')),
+                ("Region", parsed.get('regionName', 'N/A')),
+                ("City", parsed.get('city', 'N/A')),
+                ("ZIP Code", parsed.get('zip', 'N/A')),
+                ("Coordinates", f"{parsed.get('lat', 'N/A')}, {parsed.get('lon', 'N/A')}"),
+                ("Timezone", parsed.get('timezone', 'N/A')),
+                ("ISP", parsed.get('isp', 'N/A')),
+                ("Organization", parsed.get('org', 'N/A')),
+                ("AS Number", parsed.get('as', 'N/A')),
+                ("Reverse DNS", parsed.get('reverse', 'N/A')),
+                ("Mobile", str(parsed.get('mobile', 'N/A'))),
+                ("Proxy", str(parsed.get('proxy', 'N/A'))),
+                ("Hosting", str(parsed.get('hosting', 'N/A'))),
+            ]
+            
+            if ui is not None:
+                ui.result_table(f"IP LOOKUP RESULTS — {target_ip}", ["FIELD", "VALUE"], ip_data, border_style="green")
+            else:
+                print(f"\n{Colors.GREEN}[✓] IP LOOKUP RESULTS // {target_ip}{Colors.RESET}")
+                print("-" * 75)
+                print(f"{Colors.BOLD}{'FIELD':<20}{'VALUE'}{Colors.RESET}")
+                print("-" * 75)
+                print(f"{'IP Address':<20}{Colors.CYAN}{target_ip}{Colors.RESET}")
+                print(f"{'Country':<20}{Colors.CYAN}{parsed.get('country', 'N/A')}{Colors.RESET}")
+                print(f"{'Country Code':<20}{Colors.CYAN}{parsed.get('countryCode', 'N/A')}{Colors.RESET}")
+                print(f"{'Region':<20}{Colors.CYAN}{parsed.get('regionName', 'N/A')}{Colors.RESET}")
+                print(f"{'City':<20}{Colors.CYAN}{parsed.get('city', 'N/A')}{Colors.RESET}")
+                print(f"{'ZIP Code':<20}{Colors.CYAN}{parsed.get('zip', 'N/A')}{Colors.RESET}")
+                print(f"{'Coordinates':<20}{Colors.CYAN}{parsed.get('lat', 'N/A')}, {parsed.get('lon', 'N/A')}{Colors.RESET}")
+                print(f"{'Timezone':<20}{Colors.CYAN}{parsed.get('timezone', 'N/A')}{Colors.RESET}")
+                print(f"{'ISP':<20}{Colors.CYAN}{parsed.get('isp', 'N/A')}{Colors.RESET}")
+                print(f"{'Organization':<20}{Colors.CYAN}{parsed.get('org', 'N/A')}{Colors.RESET}")
+                print(f"{'AS Number':<20}{Colors.CYAN}{parsed.get('as', 'N/A')}{Colors.RESET}")
+                print(f"{'Reverse DNS':<20}{Colors.CYAN}{parsed.get('reverse', 'N/A')}{Colors.RESET}")
+                print(f"{'Mobile':<20}{Colors.CYAN}{str(parsed.get('mobile', 'N/A'))}{Colors.RESET}")
+                print(f"{'Proxy':<20}{Colors.CYAN}{str(parsed.get('proxy', 'N/A'))}{Colors.RESET}")
+                print(f"{'Hosting':<20}{Colors.CYAN}{str(parsed.get('hosting', 'N/A'))}{Colors.RESET}")
+                print("-" * 75)
     except Exception as e:
-        print(f"\n{Colors.RED}[!] IP lookup failed: {e}{Colors.RESET}")
+        if ui is not None:
+            ui.error(f"IP lookup failed: {e}")
+        else:
+            print(f"\n{Colors.RED}[!] IP lookup failed: {e}{Colors.RESET}")
     
-    input(f"\nPress Enter to load submenu options...")
+    if ui is not None:
+        ui.pause("Press Enter to return")
+    else:
+        input(f"\nPress Enter to load submenu options...")
 
 def run_nmap_scan():
     """Invokes nmap for advanced port scanning, service detection, and OS fingerprinting."""
-    print(f"\n{Colors.AMBER}[MODULE 12 // NEXUS ADVANCED PORT SCANNER (NMAP)]{Colors.RESET}")
-    target = input("\nEnter target IP / hostname / CIDR range: ").strip()
+    if ui is not None:
+        ui.section("MODULE 12 // NEXUS ADVANCED PORT SCANNER (NMAP)", "cyan")
+    else:
+        print(f"\n{Colors.AMBER}[MODULE 12 // NEXUS ADVANCED PORT SCANNER (NMAP)]{Colors.RESET}")
+    target = (ui.prompt_input("Enter target IP / hostname / CIDR range:") if ui is not None else input("\nEnter target IP / hostname / CIDR range: ").strip())
     if not target:
         return
 
     executable_path = find_global_command('nmap')
     if not executable_path or not os.path.exists(executable_path):
-        print(f"{Colors.RED}[!] Binary Not Found: nmap is not installed or not in system PATH.{Colors.RESET}")
-        print(f"{Colors.AMBER}    Install via: choco install nmap or download from https://nmap.org/{Colors.RESET}")
+        if ui is not None:
+            ui.error("Binary Not Found: nmap is not installed or not in system PATH.")
+            ui.warning("Install via: choco install nmap or download from https://nmap.org/")
+        else:
+            print(f"{Colors.RED}[!] Binary Not Found: nmap is not installed or not in system PATH.{Colors.RESET}")
+            print(f"{Colors.AMBER}    Install via: choco install nmap or download from https://nmap.org/{Colors.RESET}")
         input(f"\nPress Enter to load submenu options...")
         return
 
-    print("\nSelect scan type:")
-    print("  [1] Quick TCP scan (top 1000 ports)")
-    print("  [2] Full TCP scan (all 65535 ports)")
-    print("  [3] Service/version detection")
-    print("  [4] OS fingerprinting")
-    print("  [5] Aggressive scan (service + OS + traceroute)")
-    print("  [6] Custom arguments")
-    scan_choice = input("Enter choice (1-6) [Default: 1]: ").strip() or "1"
+    scan_choices = [
+        ("1", "Quick TCP scan (top 1000 ports)"),
+        ("2", "Full TCP scan (all 65535 ports)"),
+        ("3", "Service/version detection"),
+        ("4", "OS fingerprinting"),
+        ("5", "Aggressive scan (service + OS + traceroute)"),
+        ("6", "Custom arguments"),
+    ]
+    if ui is not None:
+        ui.console.print()
+        scan_table = Table(title="SCAN TYPE SELECTION", border_style="cyan", header_style="bold cyan", box=ROUNDED)
+        scan_table.add_column("OPTION", style="bold yellow", width=8)
+        scan_table.add_column("DESCRIPTION", ratio=1)
+        for num, desc in scan_choices:
+            scan_table.add_row(num, desc)
+        ui.console.print(scan_table)
+        scan_choice = ui.console.input("[bold yellow]\n  Enter choice (1-6) [Default: 1]: [/bold yellow]").strip() or "1"
+    else:
+        print("\nSelect scan type:")
+        print("  [1] Quick TCP scan (top 1000 ports)")
+        print("  [2] Full TCP scan (all 65535 ports)")
+        print("  [3] Service/version detection")
+        print("  [4] OS fingerprinting")
+        print("  [5] Aggressive scan (service + OS + traceroute)")
+        print("  [6] Custom arguments")
+        scan_choice = input("Enter choice (1-6) [Default: 1]: ").strip() or "1"
 
     scan_map = {
         "1": ["-F"],
@@ -881,21 +1315,40 @@ def run_nmap_scan():
     else:
         cmd = [executable_path] + scan_map.get(scan_choice, ["-F"]) + [target]
 
-    print(f"\n{Colors.CYAN}Command: {' '.join(cmd)}{Colors.RESET}")
-    confirm = input("\nExecute scan? (Y/N): ").strip().upper()
+    if ui is not None:
+        ui.console.print(f"\n[cyan]Command:[/] {' '.join(cmd)}")
+        confirm = ui.console.input("[bold yellow]\n  Execute scan? (Y/N): [/bold yellow]").strip().upper()
+    else:
+        print(f"\n{Colors.CYAN}Command: {' '.join(cmd)}{Colors.RESET}")
+        confirm = input("\nExecute scan? (Y/N): ").strip().upper()
     if confirm != 'Y':
-        print(f"{Colors.AMBER}Aborted by operator.{Colors.RESET}")
+        if ui is not None:
+            ui.warning("Aborted by operator.")
+        else:
+            print(f"{Colors.AMBER}Aborted by operator.{Colors.RESET}")
         return
 
-    print(f"\n{Colors.GREEN}Launching nmap...{Colors.RESET}")
+    if ui is not None:
+        ui.info("Launching nmap...")
+    else:
+        print(f"\n{Colors.GREEN}Launching nmap...{Colors.RESET}")
     try:
         subprocess.run(cmd, capture_output=False, text=True)
     except KeyboardInterrupt:
-        print(f"\n{Colors.AMBER}[!] Scan interrupted by operator.{Colors.RESET}")
+        if ui is not None:
+            ui.warning("Scan interrupted by operator.")
+        else:
+            print(f"\n{Colors.AMBER}[!] Scan interrupted by operator.{Colors.RESET}")
     except Exception as e:
-        print(f"{Colors.RED}[!] Execution error: {e}{Colors.RESET}")
+        if ui is not None:
+            ui.error(f"Execution error: {e}")
+        else:
+            print(f"{Colors.RED}[!] Execution error: {e}{Colors.RESET}")
 
-    input(f"\nPress Enter to load submenu options...")
+    if ui is not None:
+        ui.pause("Press Enter to return")
+    else:
+        input(f"\nPress Enter to load submenu options...")
 
 # ================================================================================
 # SUB-DIRECTORY 02 ENGINE ROUTINES (EXTERNAL OSINT CORES)
@@ -903,87 +1356,103 @@ def run_nmap_scan():
 
 def run_sherlock_hook():
     """Invokes globally configured Sherlock profiles via system execution scripts."""
-    print(f"\n{Colors.CYAN}[MODULE 01 // LIVE SYSTEM LAUNCH: SHERLOCK USERNAME TRACER]{Colors.RESET}")
-    target_user = input("\nEnter target handle alias to trace: ").strip()
-    if not target_user:
-        return
-        
-    print(f"\n{Colors.GREEN}Spawning live shell execution sandbox subprocess environment...{Colors.RESET}")
+    if ui is not None: ui.section("MODULE 01 // LIVE SYSTEM LAUNCH: SHERLOCK USERNAME TRACER", "cyan")
+    else: print(f"\n{Colors.CYAN}[MODULE 01 // LIVE SYSTEM LAUNCH: SHERLOCK USERNAME TRACER]{Colors.RESET}")
+    target_user = (ui.prompt_input("Enter target handle alias to trace:") if ui is not None else input("\nEnter target handle alias to trace: ").strip())
+    if not target_user: return
+    if ui is not None: ui.info("Spawning live shell execution sandbox subprocess environment...")
+    else: print(f"\n{Colors.GREEN}Spawning live shell execution sandbox subprocess environment...{Colors.RESET}")
     executable_target = find_global_command('sherlock')
-    print(f"Running context: {executable_target} {target_user} --timeout 5\n")
+    if ui is not None: print(f"  Running context: [cyan]{executable_target} {target_user} --timeout 5[/cyan]")
+    else: print(f"Running context: {executable_target} {target_user} --timeout 5\n")
     print("-" * 75)
-    
     try:
         subprocess.run([executable_target, target_user, '--timeout', '5'], capture_output=False, text=True)
     except FileNotFoundError:
-        print(f"{Colors.RED}[!] Environment Path Exception: System variables cannot locate the executable command.{Colors.RESET}")
-        print("Resolve this by configuring your shell or executing: pipx install sherlock-project")
-        
+        if ui is not None:
+            ui.error("Environment Path Exception: System variables cannot locate the executable command.")
+            ui.info("Resolve this by configuring your shell or executing: pipx install sherlock-project")
+        else:
+            print(f"{Colors.RED}[!] Environment Path Exception: System variables cannot locate the executable command.{Colors.RESET}")
+            print("Resolve this by configuring your shell or executing: pipx install sherlock-project")
     print("-" * 75)
     input(f"\nSubprocess returned exit context code. Press Enter to open submenu...")
 
 def run_phoneinfoga_hook():
     """Invokes compiled PhoneInfoga infrastructure components via binary execution modules."""
-    print(f"\n{Colors.CYAN}[MODULE 02 // LIVE SYSTEM LAUNCH: PHONEINFOGA TELECOM SCANNER]{Colors.RESET}")
-    target_number = input("\nEnter target layout telephone with country flag code (e.g., +14155552671): ").strip()
-    if not target_number:
-        return
-        
-    print(f"\n{Colors.GREEN}Spawning live shell execution sandbox subprocess environment...{Colors.RESET}")
+    if ui is not None: ui.section("MODULE 02 // LIVE SYSTEM LAUNCH: PHONEINFOGA TELECOM SCANNER", "cyan")
+    else: print(f"\n{Colors.CYAN}[MODULE 02 // LIVE SYSTEM LAUNCH: PHONEINFOGA TELECOM SCANNER]{Colors.RESET}")
+    target_number = (ui.prompt_input("Enter target telephone with country code (e.g., +14155552671):") if ui is not None else input("\nEnter target layout telephone with country flag code (e.g., +14155552671): ").strip())
+    if not target_number: return
+    if ui is not None: ui.info("Spawning live shell execution sandbox subprocess environment...")
+    else: print(f"\n{Colors.GREEN}Spawning live shell execution sandbox subprocess environment...{Colors.RESET}")
     executable_target = find_global_command('phoneinfoga')
-    print(f"Running context: {executable_target} scan -n {target_number}\n")
+    if ui is not None: print(f"  Running context: [cyan]{executable_target} scan -n {target_number}[/cyan]")
+    else: print(f"Running context: {executable_target} scan -n {target_number}\n")
     print("-" * 75)
-    
     try:
         subprocess.run([executable_target, 'scan', '-n', target_number], capture_output=False, text=True)
     except FileNotFoundError:
-        print(f"{Colors.RED}[!] Environment Path Exception: Local machine environment cannot see binary configuration nodes.{Colors.RESET}")
-        print("Verify your workspace subfolder assets or ensure the program path is added to your environment rules.")
-        
+        if ui is not None:
+            ui.error("Environment Path Exception: Local machine environment cannot see binary configuration nodes.")
+            ui.info("Verify your workspace subfolder assets or ensure the program path is added to your environment rules.")
+        else:
+            print(f"{Colors.RED}[!] Environment Path Exception: Local machine environment cannot see binary configuration nodes.{Colors.RESET}")
+            print("Verify your workspace subfolder assets or ensure the program path is added to your environment rules.")
     print("-" * 75)
     input(f"\nSubprocess returned exit context code. Press Enter to open submenu...")
 
 def run_holehe_hook():
     """Launches Holehe email trace arrays via terminal command subprocesses."""
-    print(f"\n{Colors.CYAN}[MODULE 03 // LIVE SYSTEM LAUNCH: HOLEHE EMAIL PLATFORM AUDITOR]{Colors.RESET}")
-    target_mail = input("\nEnter target email address profile to trace: ").strip()
+    if ui is not None: ui.section("MODULE 03 // LIVE SYSTEM LAUNCH: HOLEHE EMAIL PLATFORM AUDITOR", "cyan")
+    else: print(f"\n{Colors.CYAN}[MODULE 03 // LIVE SYSTEM LAUNCH: HOLEHE EMAIL PLATFORM AUDITOR]{Colors.RESET}")
+    target_mail = (ui.prompt_input("Enter target email address profile to trace:") if ui is not None else input("\nEnter target email address profile to trace: ").strip())
     if not target_mail or "@" not in target_mail:
-        print(f"{Colors.RED}[!] Input Format Validation Error: Invalid structure format tracking input.{Colors.RESET}")
+        if ui is not None:
+            ui.error("Input Format Validation Error: Invalid structure format tracking input.")
+        else:
+            print(f"{Colors.RED}[!] Input Format Validation Error: Invalid structure format tracking input.{Colors.RESET}")
         time.sleep(1)
         return
-        
-    print(f"\n{Colors.GREEN}Spawning live shell execution sandbox subprocess environment...{Colors.RESET}")
+    if ui is not None: ui.info("Spawning live shell execution sandbox subprocess environment...")
+    else: print(f"\n{Colors.GREEN}Spawning live shell execution sandbox subprocess environment...{Colors.RESET}")
     executable_target = find_global_command('holehe')
-    print(f"Running context: {executable_target} {target_mail}\n")
+    if ui is not None: print(f"  Running context: [cyan]{executable_target} {target_mail}[/cyan]")
+    else: print(f"Running context: {executable_target} {target_mail}\n")
     print("-" * 75)
-    
     try:
         subprocess.run([executable_target, target_mail], capture_output=False, text=True)
     except FileNotFoundError:
-        print(f"{Colors.RED}[!] Environment Path Exception: Execution link dropped due to missing package file structures.{Colors.RESET}")
-        print("Deploy capabilities to your local python setup via terminal step: pip install holehe")
-        
+        if ui is not None:
+            ui.error("Environment Path Exception: Execution link dropped due to missing package file structures.")
+            ui.info("Deploy capabilities to your local python setup via terminal step: pip install holehe")
+        else:
+            print(f"{Colors.RED}[!] Environment Path Exception: Execution link dropped due to missing package file structures.{Colors.RESET}")
+            print("Deploy capabilities to your local python setup via terminal step: pip install holehe")
     print("-" * 75)
     input(f"\nSubprocess returned exit context code. Press Enter to open submenu...")
 
 def run_socialscan_hook():
     """Launches Socialscan profile cross-references concurrently across social arrays."""
-    print(f"\n{Colors.CYAN}[MODULE 04 // LIVE SYSTEM LAUNCH: SOCIALSCAN CONCURRENT IDENTITY PROFILER]{Colors.RESET}")
-    target_string = input("\nEnter target credential handle or mail index to cross-reference: ").strip()
-    if not target_string:
-        return
-        
-    print(f"\n{Colors.GREEN}Spawning live shell execution sandbox subprocess environment...{Colors.RESET}")
+    if ui is not None: ui.section("MODULE 04 // LIVE SYSTEM LAUNCH: SOCIALSCAN CONCURRENT IDENTITY PROFILER", "cyan")
+    else: print(f"\n{Colors.CYAN}[MODULE 04 // LIVE SYSTEM LAUNCH: SOCIALSCAN CONCURRENT IDENTITY PROFILER]{Colors.RESET}")
+    target_string = (ui.prompt_input("Enter target credential handle or mail index to cross-reference:") if ui is not None else input("\nEnter target credential handle or mail index to cross-reference: ").strip())
+    if not target_string: return
+    if ui is not None: ui.info("Spawning live shell execution sandbox subprocess environment...")
+    else: print(f"\n{Colors.GREEN}Spawning live shell execution sandbox subprocess environment...{Colors.RESET}")
     executable_target = find_global_command('socialscan')
-    print(f"Running context: {executable_target} {target_string}\n")
+    if ui is not None: print(f"  Running context: [cyan]{executable_target} {target_string}[/cyan]")
+    else: print(f"Running context: {executable_target} {target_string}\n")
     print("-" * 75)
-    
     try:
         subprocess.run([executable_target, target_string], capture_output=False, text=True)
     except FileNotFoundError:
-        print(f"{Colors.RED}[!] Environment Path Exception: Script link trace dropped due to unprovisioned package headers.{Colors.RESET}")
-        print("Provision this workspace framework layer by executing command step: pip install socialscan")
-        
+        if ui is not None:
+            ui.error("Environment Path Exception: Script link trace dropped due to unprovisioned package headers.")
+            ui.info("Provision this workspace framework layer by executing command step: pip install socialscan")
+        else:
+            print(f"{Colors.RED}[!] Environment Path Exception: Script link trace dropped due to unprovisioned package headers.{Colors.RESET}")
+            print("Provision this workspace framework layer by executing command step: pip install socialscan")
     print("-" * 75)
     input(f"\nSubprocess returned exit context code. Press Enter to open submenu...")
 
@@ -992,11 +1461,11 @@ def run_live_breach_checker():
     Queries open-source API telemetry registries to audit exposures.
     Leverages unauthenticated range hashes to flag leaked credentials safely.
     """
-    print(f"\n{Colors.CYAN}[MODULE 05 // LIVE ONLINE DATA BREACH EXPLORER & PASSWORD LEAK CHECKER]{Colors.RESET}")
-    print(" [1] Audit Email Identifier Exposure (XposedOrNot Public API)")
-    print(" [2] Audit Password Exposure Anonymously (HaveIBeenPwned Range API)")
-    mode = input("Select inspection target mode (1/2): ").strip()
-    
+    if ui is not None: ui.section("MODULE 05 // LIVE ONLINE DATA BREACH EXPLORER & PASSWORD LEAK CHECKER", "cyan")
+    else: print(f"\n{Colors.CYAN}[MODULE 05 // LIVE ONLINE DATA BREACH EXPLORER & PASSWORD LEAK CHECKER]{Colors.RESET}")
+    mode = (ui.console.input("[bold yellow]  Select inspection mode (1/2) [1=Email / 2=Password]: [/bold yellow]").strip()
+            if ui is not None else input("Select inspection target mode (1/2): ").strip())
+
     if mode == "1":
         target_email = input("\nEnter target email address to audit: ").strip()
         if not target_email or "@" not in target_email:
@@ -1011,17 +1480,29 @@ def run_live_breach_checker():
                 if response.status == 200:
                     raw_json = response.read().decode('utf-8')
                     parsed_data = json.loads(raw_json)
-                    print(f"\n{Colors.RED}[!] EXPOSURE FOUND INSIDE INDEXED DATA LEAKS{Colors.RESET}")
-                    print("-" * 75)
-                    if isinstance(parsed_data, dict) and "breaches_details" in parsed_data:
-                        details = parsed_data.get("breaches_details", {})
-                        for breach_name in details:
-                            print(f"  ➔ Exposed Source: {Colors.AMBER}{breach_name}{Colors.RESET}")
-                    else:
-                        print("  ➔ Record tracked inside independent credential dumps or paste files.")
+            if ui is not None:
+                ui.error("EXPOSURE FOUND INSIDE INDEXED DATA LEAKS")
+                if isinstance(parsed_data, dict) and "breaches_details" in parsed_data:
+                    details = parsed_data.get("breaches_details", {})
+                    breach_rows = [(name, "") for name in details]
+                    ui.result_table("EXPOSED SOURCES", ["BREACH SOURCE", "DETAILS"], breach_rows, border_style="red")
+                else:
+                    ui.info("Record tracked inside independent credential dumps or paste files.")
+            else:
+                print(f"\n{Colors.RED}[!] EXPOSURE FOUND INSIDE INDEXED DATA LEAKS{Colors.RESET}")
+                print("-" * 75)
+                if isinstance(parsed_data, dict) and "breaches_details" in parsed_data:
+                    details = parsed_data.get("breaches_details", {})
+                    for breach_name in details:
+                        print(f"  ➔ Exposed Source: {Colors.AMBER}{breach_name}{Colors.RESET}")
+                else:
+                    print("  ➔ Record tracked inside independent credential dumps or paste files.")
         except urllib.error.HTTPError as err:
             if err.code == 404:
-                print(f"\n{Colors.GREEN}[✓] STATUS SECURE: No data data breaches discovered for this email.{Colors.RESET}")
+                if ui is not None:
+                    ui.success("STATUS SECURE: No data breaches discovered for this email.")
+                else:
+                    print(f"\n{Colors.GREEN}[✓] STATUS SECURE: No data data breaches discovered for this email.{Colors.RESET}")
             else:
                 print(f"\n{Colors.RED}[!] API query dropped: HTTP status code {err.code}{Colors.RESET}")
         except Exception as e:
@@ -1070,8 +1551,9 @@ def run_live_breach_checker():
 
 def run_threat_intel():
     """Downloads public Tor directory indices to check if an address maps to an exit node."""
-    print(f"\n{Colors.CYAN}[MODULE 06 // TOR EXIT NODE THREAT INTELLIGENCE NODE VALIDATOR]{Colors.RESET}")
-    target_ip = input("\nEnter target IP address to check: ").strip()
+    if ui is not None: ui.section("MODULE 06 // TOR EXIT NODE THREAT INTELLIGENCE NODE VALIDATOR", "cyan")
+    else: print(f"\n{Colors.CYAN}[MODULE 06 // TOR EXIT NODE THREAT INTELLIGENCE NODE VALIDATOR]{Colors.RESET}")
+    target_ip = (ui.prompt_input("Enter target IP address to check:") if ui is not None else input("\nEnter target IP address to check: ").strip())
     if not target_ip:
         return
         
@@ -1089,26 +1571,40 @@ def run_threat_intel():
                     row_elements = text_row.split()
                     if len(row_elements) > 1:
                         allocated_exit_nodes.add(row_elements[1])
-                        
-            print(f"\n{Colors.GREEN}[✓] VERIFIED THREAT FEED SYNCHRONIZED{Colors.RESET}")
-            print("-" * 70)
-            if target_ip in allocated_exit_nodes:
-                print(f"Target Track IP Address: {target_ip}")
-                print(f"Threat Analysis Verdict: {Colors.RED}[!!!] THREAT DETECTED // CONFIRMED TOR EXIT LAYER GATEWAY{Colors.RESET}")
+            
+            if ui is not None:
+                status_label = "[red]THREAT DETECTED — TOR EXIT LAYER GATEWAY[/red]" if target_ip in allocated_exit_nodes else "[green]CLEAN INTERFACE ROUTE[/green]"
+                verdict_text = f"Target: {target_ip}  |  Verdict: {status_label}"
+                ui.panel(verdict_text, title="VERIFIED THREAT FEED SYNCHRONIZED", border_style="green")
             else:
-                print(f"Target Track IP Address: {target_ip}")
-                print(f"Threat Analysis Verdict: {Colors.GREEN}[✓] CLEAN INTERFACE ROUTE{Colors.RESET}")
+                print(f"\n{Colors.GREEN}[✓] VERIFIED THREAT FEED SYNCHRONIZED{Colors.RESET}")
+                print("-" * 70)
+                if target_ip in allocated_exit_nodes:
+                    print(f"Target Track IP Address: {target_ip}")
+                    print(f"Threat Analysis Verdict: {Colors.RED}[!!!] THREAT DETECTED // CONFIRMED TOR EXIT LAYER GATEWAY{Colors.RESET}")
+                else:
+                    print(f"Target Track IP Address: {target_ip}")
+                    print(f"Threat Analysis Verdict: {Colors.GREEN}[✓] CLEAN INTERFACE ROUTE{Colors.RESET}")
     except Exception as ex:
-        print(f"\n{Colors.RED}[!] Failed to capture streaming telemetry metrics from threat source: {ex}{Colors.RESET}")
+        if ui is not None:
+            ui.error(f"Failed to capture streaming telemetry metrics from threat source: {ex}")
+        else:
+            print(f"\n{Colors.RED}[!] Failed to capture streaming telemetry metrics from threat source: {ex}{Colors.RESET}")
         
-    print("-" * 70)
-    input(f"\nModule processing terminated. Press Enter to draw sub-directory menus...")
+    if ui is not None:
+        ui.pause("Press Enter to return")
+    else:
+        input(f"\nModule processing terminated. Press Enter to draw sub-directory menus...")
 
 def run_homograph_analyzer():
     """Natively audits domains for IDN homograph phishing character spoofing arrays."""
-    print(f"\n{Colors.CYAN}[MODULE 08 // IDN HOMOGRAPH PHISHING DOMAIN & PUNYCODE ANALYZER]{Colors.RESET}")
-    print("Translates string descriptors between Unicode and standard Punycode formats.")
-    input_domain = input("\nEnter target domain to inspect (e.g., xn--appl-43d.com or apple.com): ").strip().lower()
+    if ui is not None: ui.section("MODULE 08 // IDN HOMOGRAPH PHISHING DOMAIN & PUNYCODE ANALYZER", "cyan", subtitle="Translates string descriptors between Unicode and standard Punycode formats.")
+    else:
+        print(f"\n{Colors.CYAN}[MODULE 08 // IDN HOMOGRAPH PHISHING DOMAIN & PUNYCODE ANALYZER]{Colors.RESET}")
+        print("Translates string descriptors between Unicode and standard Punycode formats.")
+    input_domain = (ui.prompt_input("Enter target domain to inspect (e.g., xn--appl-43d.com or apple.com):").lower()
+                    if ui is not None
+                    else input("\nEnter target domain to inspect (e.g., xn--appl-43d.com or apple.com): ").strip().lower())
     if not input_domain:
         return
         
@@ -1117,22 +1613,42 @@ def run_homograph_analyzer():
     try:
         if input_domain.startswith("xn--") or ".xn--" in input_domain:
             decoded_unicode = input_domain.encode('ascii').decode('idna')
-            print(f"  ➔ Input Type Format      : {Colors.AMBER}PUNYCODE (Obfuscated String Grid){Colors.RESET}")
-            print(f"  ➔ Cleartext Unicode Target: {Colors.GREEN}{decoded_unicode}{Colors.RESET}")
-            print(f"  ➔ Active Auditing Flag   : {Colors.RED}[!] Relief mapping indicates an international domain proxy mask.{Colors.RESET}")
+            if ui is not None:
+                ui.result_table("HOMOGRAPH ANALYSIS RESULTS", ["FIELD", "VALUE"], [
+                    ("Input Type Format", "[yellow]PUNYCODE (Obfuscated String Grid)[/yellow]"),
+                    ("Cleartext Unicode Target", f"[green]{decoded_unicode}[/green]"),
+                    ("Active Auditing Flag", "[red][!] Relief mapping indicates an international domain proxy mask.[/red]"),
+                ], border_style="red")
+            else:
+                print(f"  ➔ Input Type Format      : {Colors.AMBER}PUNYCODE (Obfuscated String Grid){Colors.RESET}")
+                print(f"  ➔ Cleartext Unicode Target: {Colors.GREEN}{decoded_unicode}{Colors.RESET}")
+                print(f"  ➔ Active Auditing Flag   : {Colors.RED}[!] Relief mapping indicates an international domain proxy mask.{Colors.RESET}")
         else:
             encoded_punycode = input_domain.encode('idna').decode('ascii')
-            print(f"  ➔ Input Type Format      : {Colors.GREEN}STANDARD ASCII (Cleartext String Grid){Colors.RESET}")
-            print(f"  ➔ Compiled Punycode Asset : {Colors.CYAN}{encoded_punycode}{Colors.RESET}")
-            if encoded_punycode != input_domain:
-                print(f"  ➔ Active Auditing Flag   : {Colors.RED}[!] HOMOGRAPH TARGET: Contains lookalike Unicode characters!{Colors.RESET}")
+            if ui is not None:
+                flag_text = "[red][!] HOMOGRAPH TARGET: Contains lookalike Unicode characters![/red]" if encoded_punycode != input_domain else "[green][✓] CLEAN BASELINE: Native standard ASCII string configuration.[/green]"
+                ui.result_table("HOMOGRAPH ANALYSIS RESULTS", ["FIELD", "VALUE"], [
+                    ("Input Type Format", "[green]STANDARD ASCII (Cleartext String Grid)[/green]"),
+                    ("Compiled Punycode Asset", f"[cyan]{encoded_punycode}[/cyan]"),
+                    ("Active Auditing Flag", flag_text),
+                ], border_style="cyan")
             else:
-                print(f"  ➔ Active Auditing Flag   : {Colors.GREEN}[✓] CLEAN BASELINE: Native standard ASCII string configuration.{Colors.RESET}")
+                print(f"  ➔ Input Type Format      : {Colors.GREEN}STANDARD ASCII (Cleartext String Grid){Colors.RESET}")
+                print(f"  ➔ Compiled Punycode Asset : {Colors.CYAN}{encoded_punycode}{Colors.RESET}")
+                if encoded_punycode != input_domain:
+                    print(f"  ➔ Active Auditing Flag   : {Colors.RED}[!] HOMOGRAPH TARGET: Contains lookalike Unicode characters!{Colors.RESET}")
+                else:
+                    print(f"  ➔ Active Auditing Flag   : {Colors.GREEN}[✓] CLEAN BASELINE: Native standard ASCII string configuration.{Colors.RESET}")
     except Exception as e:
-        print(f"{Colors.RED}[!] Encoding codec processing failure tracing string blocks: {e}{Colors.RESET}")
+        if ui is not None:
+            ui.error(f"Encoding codec processing failure tracing string blocks: {e}")
+        else:
+            print(f"{Colors.RED}[!] Encoding codec processing failure tracing string blocks: {e}{Colors.RESET}")
         
-    print("-" * 75)
-    input(f"\nAnalysis sequence finished. Press Enter to load submenu options...")
+    if ui is not None:
+        ui.pause("Press Enter to return")
+    else:
+        input(f"\nAnalysis sequence finished. Press Enter to load submenu options...")
 
 # ================================================================================
 # SUB-DIRECTORY 03 ENGINE ROUTINES (LOCAL AUDITS & UTILITIES)
@@ -1140,11 +1656,18 @@ def run_homograph_analyzer():
 
 def run_traffic_monitor():
     """Taps directly into the machine's local socket layers using raw packet capturing flags."""
-    print(f"\n{Colors.GREEN}[MODULE 01 // INBOUND NETWORK PACKET MONITOR ENGINE]{Colors.RESET}")
-    print("Decodes real-time inbound packet metrics hitting your network interface adapter cards.")
-    print(f"{Colors.RED}[ADMIN RISK WARNING] Raw socket intercept requires Administrator / Root rights context.{Colors.RESET}\n")
+    if ui is not None:
+        ui.section("MODULE 01 // INBOUND NETWORK PACKET MONITOR ENGINE", "green",
+                   subtitle="Decodes real-time inbound packet metrics hitting your network interface adapter cards.")
+        ui.panel("[red]ADMIN RISK WARNING[/red]\nRaw socket intercept requires Administrator / Root rights context.",
+                 border_style="red")
+    else:
+        print(f"\n{Colors.GREEN}[MODULE 01 // INBOUND NETWORK PACKET MONITOR ENGINE]{Colors.RESET}")
+        print("Decodes real-time inbound packet metrics hitting your network interface adapter cards.")
+        print(f"{Colors.RED}[ADMIN RISK WARNING] Raw socket intercept requires Administrator / Root rights context.{Colors.RESET}\n")
     
-    if input("Initialize network socket mirroring operations pipeline? (Y/N): ").strip().upper() != 'Y':
+    if (ui.console.input("[bold yellow]Initialize network socket mirroring operations pipeline? (Y/N): [/bold yellow]").strip().upper()
+            if ui is not None else input("Initialize network socket mirroring operations pipeline? (Y/N): ").strip().upper()) != 'Y':
         return
 
     async_dns_register = {}
@@ -1240,15 +1763,17 @@ def run_traffic_monitor():
 
 def run_secret_scanner():
     """Scans local project source files using regex patterns to catch hardcoded api tokens."""
-    print(f"\n{Colors.GREEN}[MODULE 02 // LOCAL DIRECTORY 'SECRET & KEY' LEAK SCANNER]{Colors.RESET}")
-    target_path = input("\nEnter folder directory path path to scan [Default = current folder '.']: ").strip() or "."
-    
+    if ui is not None: ui.section("MODULE 02 // LOCAL DIRECTORY 'SECRET & KEY' LEAK SCANNER", "green")
+    else: print(f"\n{Colors.GREEN}[MODULE 02 // LOCAL DIRECTORY 'SECRET & KEY' LEAK SCANNER]{Colors.RESET}")
+    target_path = (ui.prompt_input("Enter folder directory path to scan [Default: current folder '.']:", ".")
+                   if ui is not None else input("\nEnter folder directory path path to scan [Default = current folder '.']: ").strip() or ".")
     if not os.path.exists(target_path):
-        print(f"{Colors.RED}[!] Input Target Exception: Path directory mapping unresolvable.{Colors.RESET}")
+        if ui: ui.error("Input Target Exception: Path directory mapping unresolvable.")
+        else: print(f"{Colors.RED}[!] Input Target Exception: Path directory mapping unresolvable.{Colors.RESET}")
         time.sleep(1.2)
         return
-
-    print(f"\n{Colors.GREEN}Analyzing source data text streams. Filtering compiled binary blocks...{Colors.RESET}\n")
+    if ui is not None: ui.info("Analyzing source data text streams. Filtering compiled binary blocks...")
+    else: print(f"\n{Colors.GREEN}Analyzing source data text streams. Filtering compiled binary blocks...{Colors.RESET}\n")
     regex_signature_dictionary = {
         "Google Cloud Access API Key": re.compile(r'AIza[0-9A-Za-z-_]{35}'),
         "Generic Assignment Security Hash": re.compile(r'(?i)(api_key|secret_key|password|private_key)\s*[:=]\s*["\'][0-9a-zA-Z-_]{16,64}["\']'),
@@ -1285,10 +1810,10 @@ def run_secret_scanner():
 
 def run_hash_matrix():
     """Generates localized cryptographic hashes or determines algorithm types based on bit lengths."""
-    print(f"\n{Colors.GREEN}[MODULE 03 // CRYPTOGRAPHIC HASH SIGNATURE GENERATOR & ANALYZER]{Colors.RESET}")
-    print(" [1] Process Text String into Cryptographic Signatures (Checksums)")
-    print(" [2] Profile Unknown Hash Formats using Bit-Length Constraints")
-    menu_choice = input("Select operation mode target (1/2): ").strip()
+    if ui is not None: ui.section("MODULE 03 // CRYPTOGRAPHIC HASH SIGNATURE GENERATOR & ANALYZER", "green")
+    else: print(f"\n{Colors.GREEN}[MODULE 03 // CRYPTOGRAPHIC HASH SIGNATURE GENERATOR & ANALYZER]{Colors.RESET}")
+    menu_choice = (ui.console.input("[bold cyan]\n  [1] Text → Hash  |  [2] Identify Hash Type  [Default: 1]: [/bold cyan]").strip() or "1"
+                   if ui is not None else (print(" [1] Process Text String into Cryptographic Signatures (Checksums)\n [2] Profile Unknown Hash Formats using Bit-Length Constraints") or input("Select operation mode target (1/2): ").strip()))
 
     if menu_choice == "1":
         plaintext_input_bytes = input("\nEnter text string to convert: ").encode('utf-8')
@@ -1320,54 +1845,87 @@ def run_hash_matrix():
 
 def run_system_profiler():
     """Gathers machine hardware data and environment tracking information natively."""
-    print(f"\n{Colors.GREEN}[MODULE 04 // ADVANCED HOST SYSTEM TELEMETRY PROFILER]{Colors.RESET}")
-    print("Extracting environment tracking attributes and kernel parameters...\n")
+    if ui is not None: ui.section("MODULE 04 // ADVANCED HOST SYSTEM TELEMETRY PROFILER", "green")
+    else: print(f"\n{Colors.GREEN}[MODULE 04 // ADVANCED HOST SYSTEM TELEMETRY PROFILER]{Colors.RESET}")
+    if ui is not None: ui.info("Extracting environment tracking attributes and kernel parameters...")
+    else: print("Extracting environment tracking attributes and kernel parameters...\n")
     time.sleep(0.5)
 
-    print(f"{Colors.BOLD}OS CORE METRICS:{Colors.RESET}")
-    print(f"  Primary OS Layer Name : {platform.system()}")
-    print(f"  Release Build Model   : {platform.release()}")
-    print(f"  Kernel Version Build  : {platform.version()}")
-    print(f"  Platform Architecture : {platform.machine()}")
-    print(f"  Processor Core Asset  : {platform.processor()}")
+    os_data = [
+        ("Primary OS Layer Name", platform.system()),
+        ("Release Build Model", platform.release()),
+        ("Kernel Version Build", platform.version()),
+        ("Platform Architecture", platform.machine()),
+        ("Processor Core Asset", platform.processor()),
+    ]
+    if ui is not None:
+        ui.result_table("OS CORE METRICS", ["ATTRIBUTE", "VALUE"], os_data, border_style="cyan")
+    else:
+        print(f"{Colors.BOLD}OS CORE METRICS:{Colors.RESET}")
+        for label, val in os_data:
+            print(f"  {label:<22}: {val}")
     
-    print(f"\n{Colors.BOLD}NETWORK INTERFACE HARDWARE PROFILE:{Colors.RESET}")
+    if ui is not None:
+        ui.rule_header("NETWORK INTERFACE HARDWARE PROFILE", "cyan")
+    else:
+        print(f"\n{Colors.BOLD}NETWORK INTERFACE HARDWARE PROFILE:{Colors.RESET}")
     try:
         network_host_identifier = socket.gethostname()
         primary_interface_ip = socket.gethostbyname(network_host_identifier)
-        print(f"  Console Hostname Tag : {network_host_identifier}")
-        print(f"  Primary Interface IP : {primary_interface_ip}")
+        if ui is not None:
+            ui.result_table("NETWORK INTERFACE", ["ATTRIBUTE", "VALUE"],
+                            [("Console Hostname Tag", network_host_identifier),
+                             ("Primary Interface IP", primary_interface_ip)], border_style="cyan")
+        else:
+            print(f"  Console Hostname Tag : {network_host_identifier}")
+            print(f"  Primary Interface IP : {primary_interface_ip}")
     except Exception as telemetry_error:
-        print(f"  Failed to capture hardware device descriptors: {telemetry_error}")
+        if ui is not None:
+            ui.error(f"Failed to capture hardware device descriptors: {telemetry_error}")
+        else:
+            print(f"  Failed to capture hardware device descriptors: {telemetry_error}")
 
-    print("-" * 70)
-    input(f"\nTelemetry collection phase finished. Press Enter to load submenu options...")
+    if ui is not None:
+        ui.pause("Press Enter to return")
+    else:
+        input(f"\nTelemetry collection phase finished. Press Enter to load submenu options...")
 
 def run_base64_matrix():
     """Processes plaintext variables natively into standardized Base64 output arrays."""
-    print(f"\n{Colors.GREEN}[MODULE 05 // BASE64 DATA PARSING & CODEC MATRIX]{Colors.RESET}")
+    if ui is not None: ui.section("MODULE 05 // BASE64 DATA PARSING & CODEC MATRIX", "green")
+    else: print(f"\n{Colors.GREEN}[MODULE 05 // BASE64 DATA PARSING & CODEC MATRIX]{Colors.RESET}")
     print(" [E] Encode Cleartext Variables into Standard Base64 String Format")
     print(" [D] Decode Base64 Obfuscated Format Arrays into Cleartext Strings")
-    operational_flag = input("Select processing configuration flag (E/D): ").strip().upper()
+    operational_flag = (ui.console.input("[bold yellow]Select processing flag (E/D): [/bold yellow]").strip().upper()
+                         if ui is not None
+                         else input("Select processing configuration flag (E/D): ").strip().upper())
     
     if operational_flag == 'E':
         cleartext_string_input = input("\nEnter raw text data string to transform: ")
         converted_base64_bytes = base64.b64encode(cleartext_string_input.encode('utf-8'))
-        print(f"\n{Colors.GREEN}Transformation Complete Payload String:{Colors.RESET}")
-        print(f"{Colors.BOLD}{converted_base64_bytes.decode('utf-8')}{Colors.RESET}")
+        if ui is not None:
+            ui.panel(converted_base64_bytes.decode('utf-8'), title="Transformation Complete", border_style="green")
+        else:
+            print(f"\n{Colors.GREEN}Transformation Complete Payload String:{Colors.RESET}")
+            print(f"{Colors.BOLD}{converted_base64_bytes.decode('utf-8')}{Colors.RESET}")
     elif operational_flag == 'D':
         obfuscated_base64_input = input("\nEnter base64 formatted code array string to translate: ")
         try:
             translated_cleartext_bytes = base64.b64decode(obfuscated_base64_input.encode('utf-8'))
-            print(f"\n{Colors.GREEN}De-obfuscated Restored Cleartext Data String:{Colors.RESET}")
-            print(f"{Colors.BOLD}{translated_cleartext_bytes.decode('utf-8')}{Colors.RESET}")
+            if ui is not None:
+                ui.panel(translated_cleartext_bytes.decode('utf-8'), title="De-obfuscated Cleartext", border_style="green")
+            else:
+                print(f"\n{Colors.GREEN}De-obfuscated Restored Cleartext Data String:{Colors.RESET}")
+                print(f"{Colors.BOLD}{translated_cleartext_bytes.decode('utf-8')}{Colors.RESET}")
         except Exception as payload_error:
             print(f"\n{Colors.RED}[!] Formatting Failure: Sequence is not a standard Base64 structure: {payload_error}{Colors.RESET}")
-    else:
-        print(f"{Colors.RED}[!] Operations Flag Error: Provided variable context is unresolvable.{Colors.RESET}")
+        else:
+            print(f"{Colors.RED}[!] Operations Flag Error: Provided variable context is unresolvable.{Colors.RESET}")
         
-    print("-" * 70)
-    input(f"\nPress Enter to reset active console workspace...")
+    if ui is not None:
+        ui.pause("Press Enter to return")
+    else:
+        input(f"\nPress Enter to reset active console workspace...")
 
 # ================================================================================
 # SUB-DIRECTORY 04 ENGINE ROUTINES (INTEGRITY & CORE COMPLIANCE SCANS)
@@ -1375,9 +1933,10 @@ def run_base64_matrix():
 
 def run_file_integrity_monitor():
     """Tracks filesystem state drift over time by capturing localized baseline hash registries."""
-    print(f"\n{Colors.GREEN}[MODULE 01 // LOCAL FILE INTEGRITY MONITOR (FIMS)]{Colors.RESET}")
-    target_dir = input("\nEnter target folder directory path to snapshot [Default = '.']: ").strip() or "."
-    
+    if ui is not None: ui.section("MODULE 01 // LOCAL FILE INTEGRITY MONITOR (FIMS)", "cyan")
+    else: print(f"\n{Colors.GREEN}[MODULE 01 // LOCAL FILE INTEGRITY MONITOR (FIMS)]{Colors.RESET}")
+    target_dir = (ui.prompt_input("Enter target folder directory path to snapshot [Default: '.']:", ".")
+                  if ui is not None else input("\nEnter target folder directory path to snapshot [Default = '.']: ").strip() or ".")
     if not os.path.exists(target_dir):
         print(f"{Colors.RED}[!] Error: Target filesystem path unresolvable.{Colors.RESET}")
         time.sleep(1.2)
@@ -1442,7 +2001,8 @@ def run_file_integrity_monitor():
 def run_ssl_auditor():
     """Connects to server ports using standard ssl libraries to inspect peer certificate states and expiration vectors."""
     import ssl
-    print(f"\n{Colors.GREEN}[MODULE 02 // SSL/TLS CERTIFICATE & CIPHER SUITE AUDITOR]{Colors.RESET}")
+    if ui is not None: ui.section("MODULE 02 // SSL/TLS CERTIFICATE & CIPHER SUITE AUDITOR", "cyan")
+    else: print(f"\n{Colors.GREEN}[MODULE 02 // SSL/TLS CERTIFICATE & CIPHER SUITE AUDITOR]{Colors.RESET}")
     target_host = input("\nEnter target host machine domain string (e.g., encrypted.com): ").strip()
     if not target_host:
         return
@@ -1489,7 +2049,8 @@ def run_ssl_auditor():
 
 def run_connection_profiler():
     """Queries kernel network tables via native system utilities to display listening connection descriptors."""
-    print(f"\n{Colors.GREEN}[MODULE 03 // HOST ACTIVE NETWORK CONNECTION & LISTENING PORT PROFILER]{Colors.RESET}")
+    if ui is not None: ui.section("MODULE 03 // HOST ACTIVE NETWORK CONNECTION & LISTENING PORT PROFILER", "cyan")
+    else: print(f"\n{Colors.GREEN}[MODULE 03 // HOST ACTIVE NETWORK CONNECTION & LISTENING PORT PROFILER]{Colors.RESET}")
     
     is_windows = sys.platform.startswith('win')
     cmd_arguments = ['netstat', '-ano'] if is_windows else ['ss', '-tuln']
@@ -1513,7 +2074,8 @@ def run_connection_profiler():
 
 def run_password_auditor():
     """Performs localized Shannon information-entropy metric calculations to check credential complexity parameters completely offline."""
-    print(f"\n{Colors.GREEN}[MODULE 04 // PASSWORD COMPLEXITY & OFFLINE INFORMATION ENTROPY SCANNERS]{Colors.RESET}")
+    if ui is not None: ui.section("MODULE 04 // PASSWORD COMPLEXITY & OFFLINE INFORMATION ENTROPY SCANNERS", "cyan")
+    else: print(f"\n{Colors.GREEN}[MODULE 04 // PASSWORD COMPLEXITY & OFFLINE INFORMATION ENTROPY SCANNERS]{Colors.RESET}")
     target_pwd = input("\nEnter credential string value to audit: ").strip()
     if not target_pwd:
         return
@@ -1557,7 +2119,8 @@ def run_arp_profiler():
     Parses active local network parameter neighbors natively.
     Flags duplicate physical configurations mapping anomalies over network lines.
     """
-    print(f"\n{Colors.GREEN}[MODULE 05 // LOCAL NETWORK ARP TABLE CACHE PROFILER & DUPLICATE MAC AUDITOR]{Colors.RESET}")
+    if ui is not None: ui.section("MODULE 05 // LOCAL NETWORK ARP TABLE CACHE PROFILER & DUPLICATE MAC AUDITOR", "cyan")
+    else: print(f"\n{Colors.GREEN}[MODULE 05 // LOCAL NETWORK ARP TABLE CACHE PROFILER & DUPLICATE MAC AUDITOR]{Colors.RESET}")
     time.sleep(0.5)
 
     is_windows = sys.platform.startswith('win')
@@ -1616,7 +2179,8 @@ def run_arp_profiler():
 
 def run_cidr_calculator():
     """Parses an IPv4 CIDR string offline to extract subnet masks, host ranges, and boundary thresholds mathematically."""
-    print(f"\n{Colors.GREEN}[MODULE 06 // CIDR SUBNET IPV4 NETWORK RANGE & MASK CALCULATOR]{Colors.RESET}")
+    if ui is not None: ui.section("MODULE 06 // CIDR SUBNET IPV4 NETWORK RANGE & MASK CALCULATOR", "cyan")
+    else: print(f"\n{Colors.GREEN}[MODULE 06 // CIDR SUBNET IPV4 NETWORK RANGE & MASK CALCULATOR]{Colors.RESET}")
     cidr_input = input("\nEnter target IPv4 CIDR address block (e.g., 192.168.1.0/24): ").strip()
     if not cidr_input or "/" not in cidr_input:
         print(f"{Colors.RED}[!] Format Check Error: String must follow standard CIDR prefix conventions.{Colors.RESET}")
@@ -1674,7 +2238,8 @@ def run_cidr_calculator():
 
 def run_upnp_discovery():
     """Broadcasts SSDP discovery packets natively over UDP multicast to map exposed smart devices or open router maps."""
-    print(f"\n{Colors.GREEN}[MODULE 07 // UPnP SSDP LOCAL LAN SMART DEVICE DISCOVERY EXPLORER]{Colors.RESET}")
+    if ui is not None: ui.section("MODULE 07 // UPnP SSDP LOCAL LAN SMART DEVICE DISCOVERY EXPLORER", "cyan")
+    else: print(f"\n{Colors.GREEN}[MODULE 07 // UPnP SSDP LOCAL LAN SMART DEVICE DISCOVERY EXPLORER]{Colors.RESET}")
     print("Sends an unauthenticated UDP multicast discover frame to identify hidden endpoints and UPnP mappings.")
     if input("Initialize local network UPnP multicast sweep? (Y/N): ").strip().upper() != 'Y':
         return
@@ -1714,7 +2279,8 @@ def run_upnp_discovery():
 
 def run_dns_spoof_auditor():
     """Parses platform-native static resolution system configuration files to flag hidden static redirections."""
-    print(f"\n{Colors.GREEN}[MODULE 08 // LOCAL HOSTS FILE DNS SPOOFING & CACHE POISONING AUDITOR]{Colors.RESET}")
+    if ui is not None: ui.section("MODULE 08 // LOCAL HOSTS FILE DNS SPOOFING & CACHE POISONING AUDITOR", "cyan")
+    else: print(f"\n{Colors.GREEN}[MODULE 08 // LOCAL HOSTS FILE DNS SPOOFING & CACHE POISONING AUDITOR]{Colors.RESET}")
     print("Parses local static configuration tables to flag hidden IP redirections overriding nameservers.")
     
     target_hosts_path = r"C:\Windows\System32\drivers\etc\hosts" if os.name == "nt" else "/etc/hosts"
@@ -1749,7 +2315,8 @@ def run_dns_spoof_auditor():
 
 def run_mac_vendor_lookup():
     """Extracts Organizationally Unique Identifier (OUI) prefixes to resolve physical asset manufacturers."""
-    print(f"\n{Colors.GREEN}[MODULE 09 // MAC ADDRESS OUI VENDOR DIRECTORY LOOKUP ENGINE]{Colors.RESET}")
+    if ui is not None: ui.section("MODULE 09 // MAC ADDRESS OUI VENDOR DIRECTORY LOOKUP ENGINE", "cyan")
+    else: print(f"\n{Colors.GREEN}[MODULE 09 // MAC ADDRESS OUI VENDOR DIRECTORY LOOKUP ENGINE]{Colors.RESET}")
     input_mac = input("\nEnter hardware MAC address to profile (e.g., 3C:5A:B4:FF:11:22): ").strip().upper()
     if not input_mac:
         return
@@ -1784,43 +2351,172 @@ def run_mac_vendor_lookup():
     }
     
     print(f"\n{Colors.GREEN}Analyzing physical allocation signatures for OUI prefix: {formatted_oui}...{Colors.RESET}")
-    print("-" * 75)
     
     resolved_vendor = offline_oui_cache.get(formatted_oui)
     if resolved_vendor:
-        print(f"  ➔ Hardware OUI Prefix: {formatted_oui}")
-        print(f"  ➔ Resolved Core Base : {Colors.GREEN}{resolved_vendor}{Colors.RESET}")
-        print(f"  ➔ Resolution Layer   : Local Static Cache Index Registry (Offline Success)")
+        if ui is not None:
+            ui.result_table("OUI VENDOR LOOKUP", ["FIELD", "VALUE"], [
+                ("Hardware OUI Prefix", formatted_oui),
+                ("Resolved Core Base", f"[green]{resolved_vendor}[/green]"),
+                ("Resolution Layer", "Local Static Cache Index Registry (Offline Success)"),
+            ], border_style="green")
+        else:
+            print(f"  ➔ Hardware OUI Prefix: {formatted_oui}")
+            print(f"  ➔ Resolved Core Base : {Colors.GREEN}{resolved_vendor}{Colors.RESET}")
+            print(f"  ➔ Resolution Layer   : Local Static Cache Index Registry (Offline Success)")
     else:
-        print(f"{Colors.CYAN}Prefix absent from offline cache matrix. Dispatching API request to macvendors.com...{Colors.RESET}")
+        if ui is not None:
+            ui.warning("Prefix absent from offline cache matrix. Dispatching API request to macvendors.com...")
+        else:
+            print(f"{Colors.CYAN}Prefix absent from offline cache matrix. Dispatching API request to macvendors.com...{Colors.RESET}")
         url = f"https://api.macvendors.com/{formatted_oui}"
         req = urllib.request.Request(url, headers={'User-Agent': 'Mainframe-Terminal-Multitool'})
         try:
             with urllib.request.urlopen(req, timeout=8) as response:
                 api_vendor = response.read().decode('utf-8').strip()
-                print(f"\n  ➔ Hardware OUI Prefix: {formatted_oui}")
-                print(f"  ➔ Resolved Core Base : {Colors.GREEN}{api_vendor}{Colors.RESET}")
-                print(f"  ➔ Resolution Layer   : Real-Time Distributed API Registry (Online Success)")
+                if ui is not None:
+                    ui.result_table("OUI VENDOR LOOKUP", ["FIELD", "VALUE"], [
+                        ("Hardware OUI Prefix", formatted_oui),
+                        ("Resolved Core Base", f"[green]{api_vendor}[/green]"),
+                        ("Resolution Layer", "Real-Time Distributed API Registry (Online Success)"),
+                    ], border_style="cyan")
+                else:
+                    print(f"\n  ➔ Hardware OUI Prefix: {formatted_oui}")
+                    print(f"  ➔ Resolved Core Base : {Colors.GREEN}{api_vendor}{Colors.RESET}")
+                    print(f"  ➔ Resolution Layer   : Real-Time Distributed API Registry (Online Success)")
         except urllib.error.HTTPError as err:
-            if err.code == 404:
-                print(f"\n{Colors.RED}[!] OUI Registry Unresolved: Prefix is absent from verified international indices.{Colors.RESET}")
+            if ui is not None:
+                ui.error(f"OUI Registry Unresolved: Prefix is absent from verified international indices (HTTP {err.code})")
             else:
-                print(f"\n{Colors.RED}[!] Database service dropped query: HTTP status validation error {err.code}{Colors.RESET}")
+                print(f"\n{Colors.RED}[!] OUI Registry Unresolved: Prefix is absent from verified international indices.{Colors.RESET}")
         except Exception as e:
-            print(f"\n{Colors.RED}[!] Streaming link connection timeout: Defaulting to unknown manufacturer state: {e}{Colors.RESET}")
-            
-    print("-" * 75)
-    input(f"\nProcessing complete. Press Enter to pull up sub-directory options...")
+            if ui is not None:
+                ui.error(f"Streaming link connection timeout: {e}")
+            else:
+                print(f"\n{Colors.RED}[!] Streaming link connection timeout: Defaulting to unknown manufacturer state: {e}{Colors.RESET}")
+    
+    if ui is not None:
+        ui.pause("Press Enter to return")
+    else:
+        input(f"\nProcessing complete. Press Enter to pull up sub-directory options...")
 
 # ================================================================================
-# CENTRAL SUBSYSTEM SHELL MATRIX ORCHESTRATION LOOP
 # ================================================================================
+# PLAIN SHELL PROMPT & COMMAND REFERENCE CONSTANTS
+# ================================================================================
+_HELP_TEXT = """
+  help      - Clear terminal and redraw the main menu matrix
+  tools     - Execute specific security testing subsystem
+  credits   - Display engine branding and developer information
+  customize - Open dynamic UI theme configuration
+  clear     - Wipe scrollback buffer and lock menu frame to top
+  exit      - Gracefully terminate active control session
+"""
+
+_TOOLS_TEXT = """
+  [01] Network Recon     - Port scanner, banner grabber, and subnet discovery tools
+  [02] OSINT Profilers   - Public record harvesting, domain lookup, and identity tracing
+  [03] Traffic Auditor   - Packet sniffing, local payload analyzer, and socket monitoring
+  [04] Integrity Audits  - Firewall verification, permission audit, and exploit checks
+  [05] Vector Framework  - Payload generator, active testing routines, and exploit suite
+"""
+
+_CREDITS_TEXT = """
+  yxurii / mainframe v6.0 | Multi-Core Security Testing Engine
+  Developer : yxurii
+  GitHub    : https://github.com/kayden765
+  Discord   : dsefg6924 (Server: discord.gg/FHaGEdHswv)
+"""
+
+CREDS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "logins", "credentials.txt")
+
+
+def _derive_secret(secret, salt_hex):
+    """PBKDF2-HMAC hash of a secret (username/password) with a per-account salt.
+
+    Returns a hex digest so credentials are never persisted in plaintext."""
+    salt = bytes.fromhex(salt_hex)
+    return hashlib.pbkdf2_hmac('sha256', secret.encode('utf-8'), salt, 100000).hex()
+
+
+def setup_or_login():
+    """PuTTY-style credential gate with salted, hashed credentials.
+
+    Accounts are stored in logins/credentials.txt as `salt:user_hash:pw_hash` so
+    the plaintext username/password are never written to disk. Creates an account
+    on first run (migrating any legacy plaintext record), then enforces an
+    interactive login loop before the shell begins."""
+    if not os.path.exists(CREDS_FILE):
+        os.makedirs(os.path.dirname(CREDS_FILE), exist_ok=True)
+
+    migrate = False
+    if os.path.exists(CREDS_FILE):
+        with open(CREDS_FILE, "r") as f:
+            record = f.read().strip()
+        parts = record.split(":")
+        if len(parts) == 2:
+            # Legacy plaintext (user:pass): hash in place.
+            legacy_user, legacy_pass = parts
+            salt_hex = os.urandom(16).hex()
+            with open(CREDS_FILE, "w") as f:
+                f.write(f"{salt_hex}:{_derive_secret(legacy_user, salt_hex)}:{_derive_secret(legacy_pass, salt_hex)}")
+            salt_hex, saved_user_hash, saved_pw_hash = salt_hex, _derive_secret(legacy_user, salt_hex), _derive_secret(legacy_pass, salt_hex)
+        elif len(parts) == 3:
+            salt_hex, saved_user_hash, saved_pw_hash = parts
+        else:
+            print("[!] Credentials file corrupted. Recreating account.")
+            os.remove(CREDS_FILE)
+            salt_hex = saved_user_hash = saved_pw_hash = None
+    else:
+        salt_hex = saved_user_hash = saved_pw_hash = None
+
+    if salt_hex is None:
+        print("[!] No local user file detected. Create account:")
+        new_user = input("Username: ").strip()
+        new_pass = getpass("Password: ").strip()
+        if not new_user or not new_pass:
+            print("[!] Username and password cannot be empty.\n")
+            return setup_or_login()
+        salt_hex = os.urandom(16).hex()
+        with open(CREDS_FILE, "w") as f:
+            f.write(f"{salt_hex}:{_derive_secret(new_user, salt_hex)}:{_derive_secret(new_pass, salt_hex)}")
+        print("\nAccount created and saved to logins/credentials.txt.\n")
+        with open(CREDS_FILE, "r") as f:
+            _, saved_user_hash, saved_pw_hash = f.read().strip().split(":")
+
+    while True:
+        username_input = input("login as: ").strip()
+        password_input = getpass(f"{username_input}@127.0.0.1's password: ").strip()
+        if (_derive_secret(username_input, salt_hex) == saved_user_hash and
+                _derive_secret(password_input, salt_hex) == saved_pw_hash):
+            return username_input
+        print("[!] Access denied. Incorrect username or password.\n")
+
+
+# ================================================================================
+# MAIN ENTRY POINT - PLAIN SHELL
+# ================================================================================
+def _render_home():
+    """Clear the screen and redraw the active theme banner + prompt footer.
+
+    Called at startup, after returning from a sub-directory, and after `clear`,
+    so the active UI is always visible when the operator is back at the shell."""
+    if ui is not None:
+        ui.clear()
+    else:
+        print(Colors.CLEAR_SCREEN, end="")
+    if show_theme is not None:
+        show_theme(_CURRENT_THEME)
+    print(f'Type {Colors.CYAN}help{Colors.RESET} for a list of available commands.\n')
+
 
 def main():
     """
     Main runtime entry point. Natively checks for administrative credentials
     on Windows environments and enforces self-contained UAC auto-elevation triggers.
     """
+    global _CURRENT_THEME
+
     if sys.platform.startswith('win'):
         try:
             if not ctypes.windll.shell32.IsUserAnAdmin():
@@ -1840,52 +2536,150 @@ def main():
     except Exception as scrambler_err:
         print(f"[!] Warning: Title matrix custom visual layer bypassed: {scrambler_err}")
 
-    # Engaged Session Logging Infrastructure
-    try:
-        log_directory = "logs"
-        os.makedirs(log_directory, exist_ok=True)
-        session_timestamp = time.strftime("%Y%m%d_%H%M%S")
-        log_file_name = os.path.join(log_directory, f"session_{session_timestamp}.txt")
-        
-        # Instantiate dual stream hook to duplicate runtime terminal history to disk safely
-        active_log_handle = open(log_file_name, "w", encoding="utf-8")
-        sys.stdout = DualStreamWriter(sys.stdout, active_log_handle)
-        print(f"[+] Automated Dual-Stream System Logging Operational Cores Engaged.")
-        print(f"[+] Log Target Vector Initialized: {log_file_name}\n")
-        time.sleep(1)
-    except Exception as log_init_err:
-        print(f"[!] Warning: Session logging buffer core initialization interrupted: {log_init_err}")
-        time.sleep(1.5)
+    username = setup_or_login()
+    _render_home()
 
     while True:
         try:
-            print(Colors.CLEAR_SCREEN)
-            MainframeUI.draw_banner()
-            MainframeUI.display_main_menu()
-            
-            selection_target = input(f"{Colors.BOLD}mainframe@operator_console:~# {Colors.RESET}").strip()
-            
-            if selection_target in ["1", "2", "3", "4", "5"]:
+            selection_target = input(f"{username}@mainframe:~/root/# ").strip()
+
+            if selection_target == "help":
+                print(_HELP_TEXT)
+            elif selection_target == "tools":
+                print(_TOOLS_TEXT)
+            elif selection_target in ("credits", "credit"):
+                print(_CREDITS_TEXT)
+            elif selection_target in ("clear", "cls"):
+                _render_home()
+            elif selection_target == "exit":
+                print("[!] Terminating session...")
+                sys.exit(0)
+            elif selection_target == "customize":
+                if handle_customize is not None:
+                    new_theme = handle_customize(_CURRENT_THEME)
+                    if new_theme != _CURRENT_THEME:
+                        _CURRENT_THEME = new_theme
+                        os.system("cls" if os.name == "nt" else "clear")
+                        show_theme(_CURRENT_THEME)
+                        print(f"\n{Colors.GREEN}[+] Theme applied: {_CURRENT_THEME}{Colors.RESET}")
+                        print(f'Type {Colors.CYAN}help{Colors.RESET} for a list of available commands.\n')
+                else:
+                    print(f"{Colors.YELLOW}[!] Theme engine not loaded.{Colors.RESET}")
+            elif selection_target in ("1", "2", "3", "4", "5"):
                 handle_category_deck(selection_target)
-            elif selection_target == "6":
-                print(f"\n{Colors.RED}Disconnecting security core links. Clearing memory trace structures...{Colors.RESET}")
-                time.sleep(1)
-                print(f"{Colors.GREEN}Console session closed successfully. Systems baseline nominal.{Colors.RESET}\n")
-                break
+                # Wipe the submenu buffer and redraw the active theme banner on the
+                # way back to the main directory so the UI stays visible.
+                _render_home()
             else:
-                print(f"\n{Colors.RED}[!] Unknown instruction parameter sequence. Resetting workspace...{Colors.RESET}")
-                time.sleep(1.2)
-                
+                print(f"Command '{selection_target}' not found. Type 'help' for options.\n")
+
         except KeyboardInterrupt:
-            print(f"\n\n{Colors.GREEN}[!] Main operational workflow interrupted. Disposing active frames...{Colors.RESET}")
-            break
+            print("\n[!] Session interrupted. Disposing active frames...")
+            sys.exit(0)
         except Exception as internal_error:
-            print(f"\n{Colors.RED}Mainframe master pipeline failure logged: {internal_error}{Colors.RESET}")
+            print(f"\n[!] Mainframe master pipeline failure logged: {internal_error}")
             time.sleep(2)
 
 # ================================================================================
 # CENTRAL SUBSYSTEM SHELL MATRIX ORCHESTRATION LOOP
 # ================================================================================
+
+# ================================================================================
+# ESC / '.' ABORT FAILSAFE
+# ================================================================================
+# A single daemon watcher owns the keyboard (msvcrt) so the main thread never
+# steals keystrokes. While a tool is running it listens for ESC / '.' / 'q' and
+# raises KeyboardInterrupt in the main thread -> the dispatcher returns to the
+# main menu. Ctrl+C also raises KeyboardInterrupt and is handled the same way.
+_ABORT = {"active": False}
+
+
+def _abort_watcher():
+    if msvcrt is None:
+        return
+    while _ABORT.get("active"):
+        try:
+            if msvcrt.kbhit():
+                ch = msvcrt.getwch()
+                if ch in ('.', '\x1b', 'q'):
+                    _ABORT["active"] = False
+                    _thread.interrupt_main()
+                    return
+                try:
+                    msvcrt.ungetch(ch)
+                except Exception:
+                    pass
+        except Exception:
+            return
+        time.sleep(0.05)
+
+
+def _not_loaded(name):
+    print(f"{Colors.RED}[!] {name} module not loaded.{Colors.RESET}")
+
+
+def _run_tool(deck_id, choice):
+    """Execute one directory tool under the ESC / Ctrl+C abort watcher.
+
+    Returns False when the operator should return to the MAIN menu
+    (back-entry or abort), True to stay in the current directory."""
+    actions = {
+        "1": {
+            "1": run_pinger_engine, "2": run_reverse_dns, "3": run_port_scanner,
+            "4": run_ping_sweeper, "5": run_banner_grabber, "6": run_subdomain_finder,
+            "7": run_rdap_lookup, "8": run_http_header_auditor, "9": run_doh_resolver,
+            "10": run_ip_lookup, "11": "back",
+        },
+        "2": {
+            "1": run_sherlock_hook, "2": run_phoneinfoga_hook, "3": run_holehe_hook,
+            "4": run_socialscan_hook, "5": run_live_breach_checker, "6": run_threat_intel,
+            "7": run_homograph_analyzer, "8": "back",
+        },
+        "3": {
+            "1": run_traffic_monitor, "2": run_secret_scanner, "3": run_hash_matrix,
+            "4": run_system_profiler, "5": run_base64_matrix, "6": "back",
+        },
+        "4": {
+            "1": run_file_integrity_monitor, "2": run_ssl_auditor, "3": run_connection_profiler,
+            "4": run_password_auditor, "5": run_arp_profiler, "6": run_cidr_calculator,
+            "7": run_upnp_discovery, "8": run_dns_spoof_auditor, "9": run_mac_vendor_lookup,
+            "10": "back",
+        },
+        "5": {
+            "1": lambda: ddos_attack.start_ddos() if ddos_attack else _not_loaded("DDoS Attack"),
+            "2": run_image_logger,
+            "3": lambda: bruteforce_attack.start_bruteforce() if bruteforce_attack else _not_loaded("Brute Force"),
+            "4": run_msfconsole, "5": run_msfvenom, "6": run_hashcat, "7": run_impacket,
+            "8": run_log_diagnostic, "9": run_nmap_scan, "10": "back",
+        },
+    }
+    table = actions.get(deck_id, {})
+    action = table.get(choice)
+    if action is None:
+        print(f"\n{Colors.RED}[!] Unknown instruction parameter sequence. Resetting workspace...{Colors.RESET}")
+        time.sleep(1.2)
+        return True
+    if action == "back":
+        return False
+
+    _ABORT["active"] = True
+    _ABORT["aborted"] = False
+    watcher = threading.Thread(target=_abort_watcher, daemon=True)
+    watcher.start()
+    try:
+        action()
+    except KeyboardInterrupt:
+        pass
+    except Exception as tool_err:
+        print(f"\n{Colors.RED}[!] Tool runtime error: {tool_err}{Colors.RESET}")
+    finally:
+        _ABORT["active"] = False
+    if _ABORT.get("aborted"):
+        print(f"\n{Colors.YELLOW}[!] Abort signal received. Returning to main menu.{Colors.RESET}")
+        _ABORT["aborted"] = False
+        return False
+    return True
+
 
 def handle_category_deck(deck_id):
     """
@@ -1893,148 +2687,84 @@ def handle_category_deck(deck_id):
     loop environments to maximize screen space and remove menu clutter.
     """
     while True:
-        print(Colors.CLEAR_SCREEN)
+        if ui is not None:
+            ui.clear()
+        else:
+            print(Colors.CLEAR_SCREEN, end="")
         
         # --- ENGINE PIPELINE 01: RECON UTILITIES ---
         if deck_id == "1":
             MainframeUI.display_network_menu()
-            operator_input = input(f"{Colors.BOLD}mainframe@network_cores:~# {Colors.RESET}").strip()
+            if ui is not None:
+                operator_input = ui.console.input("[bold yellow]mainframe@network_cores:~# [/bold yellow]").strip()
+            else:
+                operator_input = input(f"{Colors.BOLD}mainframe@network_cores:~# {Colors.RESET}").strip()
             
-            if operator_input == "1":
-                run_pinger_engine()
-            elif operator_input == "2":
-                run_reverse_dns()
-            elif operator_input == "3":
-                run_port_scanner()
-            elif operator_input == "4":
-                run_ping_sweeper()
-            elif operator_input == "5":
-                run_banner_grabber()
-            elif operator_input == "6":
-                run_subdomain_finder()
-            elif operator_input == "7":
-                run_rdap_lookup()
-            elif operator_input == "8":
-                run_http_header_auditor()
-            elif operator_input == "9":
-                run_doh_resolver()
-            elif operator_input == "10":
-                run_ip_lookup()
-            elif operator_input == "11":
+            if not _run_tool(deck_id, operator_input):
                 break
                 
         # --- ENGINE PIPELINE 02: EXT-OSINT UTILITIES ---
         elif deck_id == "2":
             MainframeUI.display_osint_menu()
-            operator_input = input(f"{Colors.BOLD}mainframe@osint_engines:~# {Colors.RESET}").strip()
+            if ui is not None:
+                operator_input = ui.console.input("[bold cyan]mainframe@osint_engines:~# [/bold cyan]").strip()
+            else:
+                operator_input = input(f"{Colors.BOLD}mainframe@osint_engines:~# {Colors.RESET}").strip()
             
-            if operator_input == "1":
-                run_sherlock_hook()
-            elif operator_input == "2":
-                run_phoneinfoga_hook()
-            elif operator_input == "3":
-                run_holehe_hook()
-            elif operator_input == "4":
-                run_socialscan_hook()
-            elif operator_input == "5":
-                run_live_breach_checker()
-            elif operator_input == "6":
-                run_threat_intel()
-            elif operator_input == "7":
-                run_homograph_analyzer()
-            elif operator_input == "8":
+            if not _run_tool(deck_id, operator_input):
                 break
                 
         # --- ENGINE PIPELINE 03: LOCAL UTILITIES & SCANS ---
         elif deck_id == "3":
             MainframeUI.display_utilities_menu()
-            operator_input = input(f"{Colors.BOLD}mainframe@local_utilities:~# {Colors.RESET}").strip()
+            if ui is not None:
+                operator_input = ui.console.input("[bold green]mainframe@local_utilities:~# [/bold green]").strip()
+            else:
+                operator_input = input(f"{Colors.BOLD}mainframe@local_utilities:~# {Colors.RESET}").strip()
             
-            if operator_input == "1":
-                run_traffic_monitor()
-            elif operator_input == "2":
-                run_secret_scanner()
-            elif operator_input == "3":
-                run_hash_matrix()
-            elif operator_input == "4":
-                run_system_profiler()
-            elif operator_input == "5":
-                run_base64_matrix()
-            elif operator_input == "6":
+            if not _run_tool(deck_id, operator_input):
                 break
 
         # --- ENGINE PIPELINE 04: ADVANCED COMPLIANCE AUDITS ---
         elif deck_id == "4":
             MainframeUI.display_advanced_audits_menu()
-            operator_input = input(f"{Colors.BOLD}mainframe@advanced_audits:~# {Colors.RESET}").strip()
+            if ui is not None:
+                operator_input = ui.console.input("[bold magenta]mainframe@advanced_audits:~# [/bold magenta]").strip()
+            else:
+                operator_input = input(f"{Colors.BOLD}mainframe@advanced_audits:~# {Colors.RESET}").strip()
             
-            if operator_input == "1":
-                run_file_integrity_monitor()
-            elif operator_input == "2":
-                run_ssl_auditor()
-            elif operator_input == "3":
-                run_connection_profiler()
-            elif operator_input == "4":
-                run_password_auditor()
-            elif operator_input == "5":
-                run_arp_profiler()
-            elif operator_input == "6":
-                run_cidr_calculator()
-            elif operator_input == "7":
-                run_upnp_discovery()
-            elif operator_input == "8":
-                run_dns_spoof_auditor()
-            elif operator_input == "9":
-                run_mac_vendor_lookup()
-            elif operator_input == "10":
+            if not _run_tool(deck_id, operator_input):
                 break
 
         # --- ENGINE PIPELINE 05: ATTACK VECTORS SUBMENU ---
         elif deck_id == "5":
             MainframeUI.display_attack_menu()
-            operator_input = input(f"{Colors.BOLD}mainframe@attack_vectors:~# {Colors.RESET}").strip()
-            
-            if operator_input == "1":
-                if ddos_attack is None:
-                    print(f"{Colors.RED}[!] DDoS Attack module not loaded.{Colors.RESET}")
-                else:
-                    ddos_attack.start_ddos()
-            elif operator_input == "2":
-                run_image_logger()
-            elif operator_input == "3":
-                if bruteforce_attack is None:
-                    print(f"{Colors.RED}[!] Brute Force module not loaded.{Colors.RESET}")
-                else:
-                    bruteforce_attack.start_bruteforce()
-            elif operator_input == "4":
-                run_msfconsole()
-            elif operator_input == "5":
-                run_msfvenom()
-            elif operator_input == "6":
-                run_hashcat()
-            elif operator_input == "7":
-                run_impacket()
-            elif operator_input == "8":
-                run_log_diagnostic()
-            elif operator_input == "9":
-                run_nmap_scan()
-            elif operator_input == "10":
-                break
+            if ui is not None:
+                operator_input = ui.console.input("[bold red]mainframe@attack_vectors:~# [/bold red]").strip()
             else:
-                print(f"\n{Colors.RED}[!] Unknown instruction parameter sequence. Resetting workspace...{Colors.RESET}")
-                time.sleep(1.2)
+                operator_input = input(f"{Colors.BOLD}mainframe@attack_vectors:~# {Colors.RESET}").strip()
+            
+            if not _run_tool(deck_id, operator_input):
+                break
         else:
             break
 
 def run_image_logger():
     """Starts an instant image logger that captures victim IP when they open the image."""
-    print(f"\n{Colors.CYAN}[INSTANT IMAGE LOGGER]{Colors.RESET}")
-    print(f"{Colors.GREEN}Select deployment method:{Colors.RESET}")
-    print(f"  [{Colors.AMBER}1{Colors.RESET}] Local Server (http://localhost:8080)")
-    print(f"  [{Colors.AMBER}2{Colors.RESET}] Deploy to Vercel (Public URL)")
-    print(f"  [{Colors.AMBER}3{Colors.RESET}] Return to Menu")
-    
-    choice = input(f"\n{Fore.MAGENTA}>{Fore.GREEN} Select: ").strip()
+    if ui is not None:
+        ui.section("INSTANT IMAGE LOGGER", "red",
+                   subtitle="Captures victim IP addresses when they open the tracking image.")
+        ui.console.print("  [1] Local Server (http://localhost:8080)")
+        ui.console.print("  [2] Deploy to Vercel (Public URL)")
+        ui.console.print("  [3] Return to Menu")
+        choice = ui.console.input("\n[bold yellow]> Select:[/bold yellow] ").strip()
+    else:
+        print(f"\n{Colors.CYAN}[INSTANT IMAGE LOGGER]{Colors.RESET}")
+        print(f"{Colors.GREEN}Select deployment method:{Colors.RESET}")
+        print(f"  [{Colors.AMBER}1{Colors.RESET}] Local Server (http://localhost:8080)")
+        print(f"  [{Colors.AMBER}2{Colors.RESET}] Deploy to Vercel (Public URL)")
+        print(f"  [{Colors.AMBER}3{Colors.RESET}] Return to Menu")
+        choice = input(f"\n{Fore.MAGENTA}>{Fore.GREEN} Select: ").strip()
     
     if choice == '1':
         print(f"\n{Colors.GREEN}Starting local image logger server...{Colors.RESET}")
@@ -2238,7 +2968,10 @@ def run_msfconsole():
     configurations, test network boundaries against documented service behaviors, and confirm
     patch integrity through controlled exploitation modules in isolated lab environments.
     """
-    print(f"\n{Colors.GREEN}[METASPLOIT FRAMEWORK CONSOLE INTERFACE]{Colors.RESET}")
+    if ui is not None: ui.panel("LAUNCHING INLINE — Type 'exit' or press Ctrl+C to return to menu.",
+                                  title="METASPLOIT FRAMEWORK CONSOLE", border_style="green")
+    else:
+        print(f"\n{Colors.GREEN}[METASPLOIT FRAMEWORK CONSOLE INTERFACE]{Colors.RESET}")
     executable_path = find_global_command('msfconsole')
     if not executable_path or not os.path.exists(executable_path):
         print(f"{Colors.RED}[!] Binary Not Found: msfconsole is not installed or not in system PATH.{Colors.RESET}")
@@ -2261,11 +2994,9 @@ def run_msfconsole():
 def run_msfvenom():
     """
     Interactive wizard for msfvenom payload generation.
-    Legitimate Purpose: Generates synthetic network communication payloads to test whether
-    internal IDS and corporate firewalls successfully alert on or block abnormal outbound
-    connections, validating boundary defense configurations and egress filtering rules.
     """
-    print(f"\n{Colors.GREEN}[MSFVENOM NETWORK EGRESS VERIFICATION TOOL]{Colors.RESET}")
+    if ui is not None: ui.section("MSFVENOM NETWORK EGRESS VERIFICATION TOOL", "green", subtitle="Generates synthetic payloads to test IDS/firewall boundary defense configurations.")
+    else: print(f"\n{Colors.GREEN}[MSFVENOM NETWORK EGRESS VERIFICATION TOOL]{Colors.RESET}")
     executable_path = find_global_command('msfvenom')
     if not executable_path or not os.path.exists(executable_path):
         print(f"{Colors.RED}[!] Binary Not Found: msfvenom is not installed or not in system PATH.{Colors.RESET}")
@@ -2335,11 +3066,9 @@ def run_msfvenom():
 def run_hashcat():
     """
     Launches hashcat for offline password compliance auditing.
-    Legitimate Purpose: Systems administrators use hashcat to cross-reference enterprise
-    database hashes against common dictionary lists, ensuring internal passwords adhere
-    to corporate complexity standards and identifying weak credentials for mandatory rotation.
     """
-    print(f"\n{Colors.GREEN}[HASHCAT PASSWORD-STRENGTH COMPLIANCE AUDITOR]{Colors.RESET}")
+    if ui is not None: ui.section("HASHCAT PASSWORD-STRENGTH COMPLIANCE AUDITOR", "green", subtitle="Cross-references enterprise hashes against dictionary lists for credential compliance validation.")
+    else: print(f"\n{Colors.GREEN}[HASHCAT PASSWORD-STRENGTH COMPLIANCE AUDITOR]{Colors.RESET}")
     executable_path = find_global_command('hashcat')
     if not executable_path or not os.path.exists(executable_path):
         print(f"{Colors.RED}[!] Binary Not Found: hashcat is not installed or not in system PATH.{Colors.RESET}")

