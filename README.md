@@ -1,11 +1,12 @@
 # MAINFRAME // COMPREHENSIVE SECURITY RECONNAISSANCE ENGINE
 
-**Version:** v5.90  
+**Version:** v2.0.0 
 **Architecture:** Multi-Tier Nested Subsystem Shell (Directory-Driven Layout)  
 **Platform:** Cross-Platform Windows/Linux/macOS  
 **Python:** 3.8+  
 **Tools:** 45-IN-1 Security Platform  
 
+ADDED AUTO UPDATE.
 
 ---
 this application may be detected by antivirus due to the msfvenom module and the ncat module.
