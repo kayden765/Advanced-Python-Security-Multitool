@@ -1,10 +1,7 @@
 @echo off
 chcp 65001 >nul
 title MAINFRAME - Complete Setup Installer
-echo ============================================
 echo  MAINFRAME Complete Setup Installer
-echo  40-IN-1 Security Platform ^| v5.90
-echo ============================================
 echo.
 
 :: Check for Administrator
@@ -158,9 +155,45 @@ if %errorlevel% equ 0 (
 echo.
 
 :: ============================================
-:: STEP 7: Verification
+:: STEP 7: PhoneInfoga
 :: ============================================
-echo [7/7] Verifying installations...
+echo [7/8] Installing PhoneInfoga...
+where phoneinfoga >nul 2>nul
+if %errorlevel% equ 0 (
+    echo [=] PhoneInfoga is already installed.
+) else (
+    echo     Downloading PhoneInfoga binary...
+    powershell -Command "Invoke-WebRequest -Uri 'https://github.com/sundowndev/phoneinfoga/releases/latest/download/phoneinfoga_Windows_amd64.zip' -OutFile '%TEMP%\phoneinfoga.zip' -UseBasicParsing"
+    powershell -Command "Expand-Archive -Path '%TEMP%\phoneinfoga.zip' -DestinationPath '%SCRIPT_DIR%phoneinfoga' -Force"
+    echo [+] PhoneInfoga downloaded to %SCRIPT_DIR%phoneinfoga\
+    echo     Make sure to add it to your PATH manually if needed.
+)
+echo.
+
+:: ============================================
+:: STEP 8: Node.js + Vercel CLI (Image Logger)
+:: ============================================
+echo [8/8] Checking Node.js and Vercel CLI...
+where node >nul 2>nul
+if %errorlevel% equ 0 (
+    echo [=] Node.js found.
+    where vercel >nul 2>nul
+    if %errorlevel% equ 0 (
+        echo [=] Vercel CLI found.
+    ) else (
+        echo [!] Vercel CLI not found. Install with: npm install -g vercel
+    )
+) else (
+    echo [!] Node.js not found. Install from https://nodejs.org/ for the image logger feature.
+)
+echo.
+
+:: ============================================
+:: FINAL: Verification
+:: ============================================
+echo ============================================
+echo  VERIFYING ALL INSTALLATIONS
+echo ============================================
 echo.
 
 set "FAILED=0"
@@ -197,17 +230,43 @@ if %errorlevel% equ 0 (
     set "FAILED=1"
 )
 
-if exist "%IMPACKET_DIR%\psexec.py" (
-    echo [+] psexec.py found at %IMPACKET_DIR%
+where phoneinfoga >nul 2>nul
+if %errorlevel% equ 0 (
+    echo [+] phoneinfoga found
 ) else (
-    echo [-] psexec.py NOT found
+    echo [-] phoneinfoga NOT found
     set "FAILED=1"
 )
 
-if exist "%IMPACKET_DIR%\wmiexec.py" (
-    echo [+] wmiexec.py found at %IMPACKET_DIR%
+where sherlock >nul 2>nul
+if %errorlevel% equ 0 (
+    echo [+] sherlock found
 ) else (
-    echo [-] wmiexec.py NOT found
+    echo [-] sherlock NOT found
+    set "FAILED=1"
+)
+
+python -c "import holehe" >nul 2>nul
+if %errorlevel% equ 0 (
+    echo [+] holehe (python) found
+) else (
+    echo [-] holehe NOT found
+    set "FAILED=1"
+)
+
+python -c "import socialscan" >nul 2>nul
+if %errorlevel% equ 0 (
+    echo [+] socialscan (python) found
+) else (
+    echo [-] socialscan NOT found
+    set "FAILED=1"
+)
+
+where vercel >nul 2>nul
+if %errorlevel% equ 0 (
+    echo [+] vercel CLI found
+) else (
+    echo [-] vercel CLI NOT found
     set "FAILED=1"
 )
 
@@ -226,9 +285,11 @@ echo   2. Or restart your terminal completely
 echo   3. Run 'python mainframe.py'
 echo   4. Select Sub-Directory 01 or 05 to test tools
 echo.
-echo If Chocolatey installs failed, install manually:
+echo If any installs failed, install manually:
 echo   - Nmap: https://nmap.org/
 echo   - Hashcat: https://hashcat.net/hashcat/
 echo   - Metasploit: https://www.metasploit.com/download
+echo   - PhoneInfoga: https://github.com/sundowndev/phoneinfoga/releases
+echo   - Node.js: https://nodejs.org/
 echo.
 pause
