@@ -1,27 +1,10 @@
 #!/usr/bin/env python3
-"""
-================================================================================
-MAINFRAME // SEC-OPERATIONS INTERACTIVE TERMINAL MULTITOOL CORE ENGINE
-================================================================================
-Architecture Model : Multi-Tier Nested Subsystem Shell (Directory-Driven Layout)
-Privilege Layer    : Integrated Operating System Auto-Elevation (ctypes Execution)
-Dependency Profile : Standalone Production Baseline (Zero Mandatory External Pip Packages)
-Verification Layer : Advanced System-Wide Subprocess Path Resolution
-Logging Core       : Optimized Thread-Safe Dual-Stream Intercept Logging Engine
-Visual Layer       : Cross-Platform Background Daemon Window-Title Matrix Scrambler
-================================================================================
-"""
-# ================================================================================
-# --- UI & Rendering Layer (rich-powered; falls back to ANSI if unavailable) ---
 try:
     from core.ui import ConsoleUI, get_ui
     from core.ui.console import Colors
 except Exception:
     class Colors:
-        """
-        Fallback ANSI console formatting control strings (used when rich is not installed).
-        Provides standard 16-color virtual terminal attribute configurations.
-        """
+
         RED = '\033[91m'
         AMBER = '\033[93m'
         YELLOW = '\033[93m'
@@ -46,15 +29,16 @@ except Exception:
         return None
 
 ui = get_ui() if ConsoleUI else None
-# ================================================================================
-# --- NEW IMPORTS FOR BEAST BOMBER CATEGORY 5 ---
+
+CURRENT_VERSION = "1.0.0"
+
 import sys
 from pathlib import Path
 
-# Add project root to path for core module imports
+
 sys.path.insert(0, str(Path(__file__).parent))
 
-# Initialize placeholders for optional engines and UI helpers
+
 DDoSAttack = None
 BruteForceAttack = None
 ImageLogger = None
@@ -67,7 +51,6 @@ menu_en = None
 logo_ddos = None
 logo_bruteforce = None
 
-# UI & Config helpers (critical for Beast Bomber menu display)
 try:
     from core.etc.settings import Settings as BeastSettings
     from core.etc.functions import get_lang, logo_main, menu_ru, menu_en, \
@@ -82,8 +65,7 @@ try:
 except Exception as e:
     print(f"{Colors.RED}[!] Warning: Could not load Beast Bomber UI modules. Check 'core' folder structure.{e}{Colors.RESET}")
 
-# Engine modules — each imported independently so a single missing dependency
-# doesn't block all imports.
+
 try:
     from core.ddos_attack.ddos import DDoSAttack
 except Exception:
@@ -99,9 +81,7 @@ try:
 except Exception:
     pass
 
-# --- END NEW IMPORTS ---
 
-# --- UI Theme Engine (dynamic banner themes via the `customize` command) ---
 try:
     from core.ui_theme import (DIR_THEME_STYLES, load_theme, save_theme,
                                handle_customize, show_theme, render_directory_ui)
@@ -111,7 +91,7 @@ except Exception:
     DIR_THEME_STYLES = {}
     load_theme = save_theme = handle_customize = show_theme = render_directory_ui = None
 
-# Engine module instances — created here so all menus can use them
+
 ddos_attack = DDoSAttack() if DDoSAttack else None
 bruteforce_attack = BruteForceAttack() if BruteForceAttack else None
 image_logger_instance = ImageLogger() if ImageLogger else None
@@ -152,7 +132,7 @@ except Exception:
     _requests = None
 from getpass import getpass
 
-# Initialize and synchronize virtual terminal sequences across Windows environments natively
+
 if sys.platform.startswith('win'):
     try:
         kernel32 = ctypes.windll.kernel32
@@ -160,7 +140,6 @@ if sys.platform.startswith('win'):
     except Exception:
         os.system('')
 
-# Rich rendering helpers (available when rich is installed)
 if ConsoleUI is not None:
     from rich.table import Table
     from rich.box import ROUNDED, DOUBLE
@@ -172,10 +151,8 @@ else:
     RichText = None
 
 class DualStreamWriter:
-    """
-    Thread-safe intercept standard stdout streams to simultaneously replicate console 
-    outputs into local text documents while filtering out raw ANSI layout color arrays.
-    """
+
+
     def __init__(self, original_stdout, log_file_handle):
         self.terminal = original_stdout
         self.log_file = log_file_handle
@@ -184,10 +161,10 @@ class DualStreamWriter:
         self.excluded_ips = self._load_excluded_ips()
 
     def _load_excluded_ips(self):
-        """Load IPs to exclude from logging. Checks config file and auto-detects local IP."""
+
         excluded = set()
-        
-        # Auto-detect local IP
+
+
         try:
             s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
             s.connect(("8.8.8.8", 80))
@@ -197,8 +174,8 @@ class DualStreamWriter:
                 excluded.add(local_ip)
         except Exception:
             pass
-        
-        # Load from config file if exists
+
+
         try:
             config_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'core', 'input', 'excluded_ips.txt')
             if os.path.exists(config_path):
@@ -213,7 +190,7 @@ class DualStreamWriter:
         return excluded
 
     def _scrub_ips(self, text):
-        """Replace excluded IPs with [REDACTED] in the given text."""
+
         if not self.excluded_ips:
             return text
         scrubbed = text
@@ -224,11 +201,8 @@ class DualStreamWriter:
 
     def write(self, message):
         with self.write_lock:
-            # Deliver pristine colored output to the active screen terminal interface
             self.terminal.write(message)
-            # Clean text by purging terminal manipulation and color escape blocks before saving to disk
             purified_message = self.ansi_regex.sub('', message)
-            # Scrub excluded IPs from logs
             scrubbed_message = self._scrub_ips(purified_message)
             self.log_file.write(scrubbed_message)
             self.log_file.flush()
@@ -240,13 +214,7 @@ class DualStreamWriter:
 
 
 def _render_directory_menu(title, items, header_color="cyan", dir_id="01"):
-    """Render a subdirectory menu in the same `[NN] Name - Description`
-    two-column layout as the main `help`/`tools` matrix.
 
-    Theme-sensitive: when the active UI has a directory banner in the
-    dir_banners module, the themed banner (with full command list embedded)
-    is printed. Theme "1" (default) renders plain [NN] format.
-    """
     if render_directory_ui is not None:
         render_directory_ui(_CURRENT_THEME, dir_id, items)
         return
@@ -282,15 +250,11 @@ def _render_directory_menu(title, items, header_color="cyan", dir_id="01"):
 
 
 class MainframeUI:
-    """Handles the rendering engines for banners, text structures, and menu loops.
 
-    All rendering delegates to the rich-powered ConsoleUI singleton when available,
-    falling back to ANSI Colors.* codes for environments without rich.
-    """
 
     @staticmethod
     def draw_banner():
-        """Renders the central system cybernetic telemetry node graphic."""
+
         if ui is not None:
             ui.banner()
         else:
@@ -315,7 +279,7 @@ class MainframeUI:
 
     @staticmethod
     def display_main_menu():
-        """Prints the consolidated, clean high-level operational categories."""
+
         if ui is not None:
             ui.main_menu()
             return
@@ -332,7 +296,7 @@ class MainframeUI:
 
     @staticmethod
     def display_network_menu():
-        """Submenu for core infrastructure mapping and connectivity analysis routines."""
+
         _render_directory_menu(
             "SUB-DIRECTORY 01 // NETWORK INFRASTRUCTURE & ENDPOINT RECON",
             [
@@ -354,7 +318,7 @@ class MainframeUI:
 
     @staticmethod
     def display_osint_menu():
-        """Submenu for active profile tracking and threat directory auditing lookups."""
+
         _render_directory_menu(
             "SUB-DIRECTORY 02 // EXTERNAL OSINT & TARGET PROFILE MANAGEMENT",
             [
@@ -373,7 +337,7 @@ class MainframeUI:
 
     @staticmethod
     def display_utilities_menu():
-        """Submenu for local system logs, encryption structures, and documentation blueprints."""
+
         _render_directory_menu(
             "SUB-DIRECTORY 03 // LOCAL DATA TRAFFIC, SECURITY AUDITS & UTILITIES",
             [
@@ -390,7 +354,7 @@ class MainframeUI:
 
     @staticmethod
     def display_advanced_audits_menu():
-        """Submenu for structural file integrity checks and certificate audits."""
+
         _render_directory_menu(
             "SUB-DIRECTORY 04 // ADVANCED INFRASTRUCTURE AUDITS & INTEGRITY",
             [
@@ -411,7 +375,7 @@ class MainframeUI:
 
     @staticmethod
     def display_attack_menu():
-        """Submenu for attack vectors, exploit frameworks, and defensive auditing verification tools."""
+
         _render_directory_menu(
             "SUB-DIRECTORY 05 // ATTACK VECTORS, EXPLOIT FRAMEWORKS & DEFENSIVE AUDITING",
             [
@@ -431,10 +395,7 @@ class MainframeUI:
         )
 
 def find_global_command(command_name):
-    """
-    Systematically combs through active system path blocks, user configurations,
-    and hidden global storage paths to find standalone third-party tools.
-    """
+
     cmd_path = shutil.which(command_name)
     if cmd_path:
         return cmd_path
@@ -517,11 +478,7 @@ def find_global_command(command_name):
     return command_name
 
 def title_scrambler_daemon():
-    """
-    Background worker that sets the console window title to the local machine
-    name + online core count, with a high-speed matrix letter scramble for the
-    visual cadence. Replaces the old "MATRIX MONITOR ACTIVE // CORE NODE" text.
-    """
+
     is_windows = sys.platform.startswith('win')
     machine_name = platform.node() or "mainframe"
     cores_online = os.cpu_count() or 1
@@ -545,15 +502,10 @@ def title_scrambler_daemon():
                 pass
         time.sleep(0.4)
 
-# ================================================================================
-# SUB-DIRECTORY 01 ENGINE ROUTINES (NETWORK CORES)
-# ================================================================================
+
 
 def run_pinger_engine():
-    """
-    Constructs real-time ICMP requests using the local system shell runtime variables.
-    Includes explicit verification filters to eliminate false-positive error logs.
-    """
+
     if ui is not None:
         ui.clear()
         ui.panel(
@@ -629,7 +581,7 @@ def run_pinger_engine():
         time.sleep(1.5)
 
 def run_reverse_dns():
-    """Queries active name server structures to trace IP pointer (PTR) records."""
+
     if ui is not None:
         ui.section("MODULE 02 // REVERSE DNS INFRASTRUCTURE RESOLVER", "cyan",
                    subtitle="Performs lookups against pointer distribution files to track host allocation layers.")
@@ -682,7 +634,7 @@ def run_reverse_dns():
         input(f"\nModule matrix complete. Press Enter to pull up directory layout...")
 
 def run_port_scanner():
-    """Launches rapid asynchronous connections across ports and profiles vulnerabilities/hardening vectors."""
+
     if ui is not None:
         ui.section("MODULE 03 // MULTI-THREADED PORT SCANNER & VULNERABILITY PROFILER", "cyan")
     else:
@@ -771,7 +723,7 @@ def run_port_scanner():
         input(f"\nScan operations sequence terminated. Press Enter to resume...")
 
 def run_ping_sweeper():
-    """Launches parallel ICMP echo checks across the local subnet spectrum."""
+
     if ui is not None:
         ui.section("MODULE 04 // LOCAL SUBNET PARALLEL PING SWEEPER", "cyan")
     else:
@@ -830,7 +782,7 @@ def run_ping_sweeper():
         input(f"\nSweep operation complete. Press Enter to exit subsystem layer...")
 
 def run_banner_grabber():
-    """Intercepts server banner configurations by establishing direct TCP connections."""
+
     if ui is not None:
         ui.section("MODULE 05 // NETWORK SERVICE BANNER GRABBER AUDITOR", "cyan")
     else:
@@ -877,7 +829,7 @@ def run_banner_grabber():
         input(f"\nPress Enter to return to menu directory structure...")
 
 def run_subdomain_finder():
-    """Crawls crt.sh passively to isolate exposed subdomains without generating target alerts."""
+
     if ui is not None:
         ui.section("MODULE 07 // PASSIVE DOMAIN SUBDOMAIN FINDER", "cyan")
     else:
@@ -935,7 +887,7 @@ def run_subdomain_finder():
         input(f"\nProcessing complete. Press Enter to drop layout cache...")
 
 def run_rdap_lookup():
-    """Maps autonomous network ranges and registrar details using the global RDAP architecture."""
+
     if ui is not None:
         ui.section("MODULE 08 // ADVANCED RDAP REGISTRATION INFRASTRUCTURE MAPPER", "cyan")
     else:
@@ -1024,7 +976,7 @@ def run_rdap_lookup():
         input(f"\nModule pipeline sequence finished. Press Enter to navigate back to choices...")
 
 def run_http_header_auditor():
-    """Queries a remote server to audit security-relevant HTTP defense headers."""
+
     if ui is not None:
         ui.section("MODULE 09 // HTTP HEADER SECURITY COMPLIANCE & HARDENING AUDITOR", "cyan")
     else:
@@ -1097,7 +1049,7 @@ def run_http_header_auditor():
         input(f"\nAudit operations complete. Press Enter to load submenu options...")
 
 def run_doh_resolver():
-    """Queries Cloudflare's public DNS-over-HTTPS json registry endpoint to bypass local network pools."""
+
     if ui is not None:
         ui.section("MODULE 10 // DNS-OVER-HTTPS (DOH) CLIENT RESOLVER SUBSYSTEM", "cyan",
                    subtitle="Issues secure encrypted name queries over port 443 to Cloudflare public resolvers natively.")
@@ -1179,7 +1131,7 @@ def run_doh_resolver():
         input(f"\nQuery complete. Press Enter to load submenu options...")
 
 def run_ip_lookup():
-    """Looks up IP address geolocation and metadata using ip-api.com."""
+
     if ui is not None:
         ui.section("MODULE 11 // IP ADDRESS GEOLOCATION & METADATA LOOKUP", "cyan")
     else:
@@ -1263,7 +1215,7 @@ def run_ip_lookup():
         input(f"\nPress Enter to load submenu options...")
 
 def run_nmap_scan():
-    """Invokes nmap for advanced port scanning, service detection, and OS fingerprinting."""
+
     if ui is not None:
         ui.section("MODULE 12 // NEXUS ADVANCED PORT SCANNER (NMAP)", "cyan")
     else:
@@ -1359,12 +1311,10 @@ def run_nmap_scan():
     else:
         input(f"\nPress Enter to load submenu options...")
 
-# ================================================================================
-# SUB-DIRECTORY 02 ENGINE ROUTINES (EXTERNAL OSINT CORES)
-# ================================================================================
+
 
 def run_sherlock_hook():
-    """Invokes globally configured Sherlock profiles via system execution scripts."""
+
     if ui is not None: ui.section("MODULE 01 // LIVE SYSTEM LAUNCH: SHERLOCK USERNAME TRACER", "cyan")
     else: print(f"\n{Colors.CYAN}[MODULE 01 // LIVE SYSTEM LAUNCH: SHERLOCK USERNAME TRACER]{Colors.RESET}")
     target_user = (ui.prompt_input("Enter target handle alias to trace:") if ui is not None else input("\nEnter target handle alias to trace: ").strip())
@@ -1388,7 +1338,7 @@ def run_sherlock_hook():
     input(f"\nSubprocess returned exit context code. Press Enter to open submenu...")
 
 def run_phoneinfoga_hook():
-    """Invokes compiled PhoneInfoga infrastructure components via binary execution modules."""
+
     if ui is not None: ui.section("MODULE 02 // LIVE SYSTEM LAUNCH: PHONEINFOGA TELECOM SCANNER", "cyan")
     else: print(f"\n{Colors.CYAN}[MODULE 02 // LIVE SYSTEM LAUNCH: PHONEINFOGA TELECOM SCANNER]{Colors.RESET}")
     target_number = (ui.prompt_input("Enter target telephone with country code (e.g., +14155552671):") if ui is not None else input("\nEnter target layout telephone with country flag code (e.g., +14155552671): ").strip())
@@ -1412,7 +1362,7 @@ def run_phoneinfoga_hook():
     input(f"\nSubprocess returned exit context code. Press Enter to open submenu...")
 
 def run_holehe_hook():
-    """Launches Holehe email trace arrays via terminal command subprocesses."""
+
     if ui is not None: ui.section("MODULE 03 // LIVE SYSTEM LAUNCH: HOLEHE EMAIL PLATFORM AUDITOR", "cyan")
     else: print(f"\n{Colors.CYAN}[MODULE 03 // LIVE SYSTEM LAUNCH: HOLEHE EMAIL PLATFORM AUDITOR]{Colors.RESET}")
     target_mail = (ui.prompt_input("Enter target email address profile to trace:") if ui is not None else input("\nEnter target email address profile to trace: ").strip())
@@ -1442,7 +1392,7 @@ def run_holehe_hook():
     input(f"\nSubprocess returned exit context code. Press Enter to open submenu...")
 
 def run_socialscan_hook():
-    """Launches Socialscan profile cross-references concurrently across social arrays."""
+
     if ui is not None: ui.section("MODULE 04 // LIVE SYSTEM LAUNCH: SOCIALSCAN CONCURRENT IDENTITY PROFILER", "cyan")
     else: print(f"\n{Colors.CYAN}[MODULE 04 // LIVE SYSTEM LAUNCH: SOCIALSCAN CONCURRENT IDENTITY PROFILER]{Colors.RESET}")
     target_string = (ui.prompt_input("Enter target credential handle or mail index to cross-reference:") if ui is not None else input("\nEnter target credential handle or mail index to cross-reference: ").strip())
@@ -1466,10 +1416,7 @@ def run_socialscan_hook():
     input(f"\nSubprocess returned exit context code. Press Enter to open submenu...")
 
 def run_live_breach_checker():
-    """
-    Queries open-source API telemetry registries to audit exposures.
-    Leverages unauthenticated range hashes to flag leaked credentials safely.
-    """
+
     if ui is not None: ui.section("MODULE 05 // LIVE ONLINE DATA BREACH EXPLORER & PASSWORD LEAK CHECKER", "cyan")
     else: print(f"\n{Colors.CYAN}[MODULE 05 // LIVE ONLINE DATA BREACH EXPLORER & PASSWORD LEAK CHECKER]{Colors.RESET}")
     mode = (ui.console.input("[bold yellow]  Select inspection mode (1/2) [1=Email / 2=Password]: [/bold yellow]").strip()
@@ -1559,7 +1506,7 @@ def run_live_breach_checker():
     input(f"\nPress Enter to return to sub-directory menus...")
 
 def run_threat_intel():
-    """Downloads public Tor directory indices to check if an address maps to an exit node."""
+
     if ui is not None: ui.section("MODULE 06 // TOR EXIT NODE THREAT INTELLIGENCE NODE VALIDATOR", "cyan")
     else: print(f"\n{Colors.CYAN}[MODULE 06 // TOR EXIT NODE THREAT INTELLIGENCE NODE VALIDATOR]{Colors.RESET}")
     target_ip = (ui.prompt_input("Enter target IP address to check:") if ui is not None else input("\nEnter target IP address to check: ").strip())
@@ -1606,7 +1553,7 @@ def run_threat_intel():
         input(f"\nModule processing terminated. Press Enter to draw sub-directory menus...")
 
 def run_homograph_analyzer():
-    """Natively audits domains for IDN homograph phishing character spoofing arrays."""
+
     if ui is not None: ui.section("MODULE 08 // IDN HOMOGRAPH PHISHING DOMAIN & PUNYCODE ANALYZER", "cyan", subtitle="Translates string descriptors between Unicode and standard Punycode formats.")
     else:
         print(f"\n{Colors.CYAN}[MODULE 08 // IDN HOMOGRAPH PHISHING DOMAIN & PUNYCODE ANALYZER]{Colors.RESET}")
@@ -1659,12 +1606,10 @@ def run_homograph_analyzer():
     else:
         input(f"\nAnalysis sequence finished. Press Enter to load submenu options...")
 
-# ================================================================================
-# SUB-DIRECTORY 03 ENGINE ROUTINES (LOCAL AUDITS & UTILITIES)
-# ================================================================================
+
 
 def run_traffic_monitor():
-    """Taps directly into the machine's local socket layers using raw packet capturing flags."""
+
     if ui is not None:
         ui.section("MODULE 01 // INBOUND NETWORK PACKET MONITOR ENGINE", "green",
                    subtitle="Decodes real-time inbound packet metrics hitting your network interface adapter cards.")
@@ -1860,7 +1805,7 @@ def run_traffic_monitor():
         input(f"\nNetwork data buffer cleared. Press Enter to load utilities deck...")
 
 def run_secret_scanner():
-    """Scans local project source files using regex patterns to catch hardcoded api tokens."""
+
     if ui is not None: ui.section("MODULE 02 // LOCAL DIRECTORY 'SECRET & KEY' LEAK SCANNER", "green")
     else: print(f"\n{Colors.GREEN}[MODULE 02 // LOCAL DIRECTORY 'SECRET & KEY' LEAK SCANNER]{Colors.RESET}")
     target_path = (ui.prompt_input("Enter folder directory path to scan [Default: current folder '.']:", ".")
@@ -1907,7 +1852,7 @@ def run_secret_scanner():
     input(f"\nPress Enter to reset terminal menu systems interface...")
 
 def run_hash_matrix():
-    """Generates localized cryptographic hashes or determines algorithm types based on bit lengths."""
+
     if ui is not None: ui.section("MODULE 03 // CRYPTOGRAPHIC HASH SIGNATURE GENERATOR & ANALYZER", "green")
     else: print(f"\n{Colors.GREEN}[MODULE 03 // CRYPTOGRAPHIC HASH SIGNATURE GENERATOR & ANALYZER]{Colors.RESET}")
     menu_choice = (ui.console.input("[bold cyan]\n  [1] Text → Hash  |  [2] Identify Hash Type  [Default: 1]: [/bold cyan]").strip() or "1"
@@ -1942,7 +1887,7 @@ def run_hash_matrix():
     input(f"\nPress Enter to reload menu directory layers...")
 
 def run_system_profiler():
-    """Gathers machine hardware data and environment tracking information natively."""
+
     if ui is not None: ui.section("MODULE 04 // ADVANCED HOST SYSTEM TELEMETRY PROFILER", "green")
     else: print(f"\n{Colors.GREEN}[MODULE 04 // ADVANCED HOST SYSTEM TELEMETRY PROFILER]{Colors.RESET}")
     if ui is not None: ui.info("Extracting environment tracking attributes and kernel parameters...")
@@ -1989,7 +1934,7 @@ def run_system_profiler():
         input(f"\nTelemetry collection phase finished. Press Enter to load submenu options...")
 
 def run_base64_matrix():
-    """Processes plaintext variables natively into standardized Base64 output arrays."""
+
     if ui is not None: ui.section("MODULE 05 // BASE64 DATA PARSING & CODEC MATRIX", "green")
     else: print(f"\n{Colors.GREEN}[MODULE 05 // BASE64 DATA PARSING & CODEC MATRIX]{Colors.RESET}")
     print(" [E] Encode Cleartext Variables into Standard Base64 String Format")
@@ -2025,12 +1970,10 @@ def run_base64_matrix():
     else:
         input(f"\nPress Enter to reset active console workspace...")
 
-# ================================================================================
-# SUB-DIRECTORY 04 ENGINE ROUTINES (INTEGRITY & CORE COMPLIANCE SCANS)
-# ================================================================================
+
 
 def run_file_integrity_monitor():
-    """Tracks filesystem state drift over time by capturing localized baseline hash registries."""
+
     if ui is not None: ui.section("MODULE 01 // LOCAL FILE INTEGRITY MONITOR (FIMS)", "cyan")
     else: print(f"\n{Colors.GREEN}[MODULE 01 // LOCAL FILE INTEGRITY MONITOR (FIMS)]{Colors.RESET}")
     target_dir = (ui.prompt_input("Enter target folder directory path to snapshot [Default: '.']:", ".")
@@ -2097,7 +2040,7 @@ def run_file_integrity_monitor():
     input(f"\nProcessing complete. Press Enter to pull up sub-directory options...")
 
 def run_ssl_auditor():
-    """Connects to server ports using standard ssl libraries to inspect peer certificate states and expiration vectors."""
+
     import ssl
     if ui is not None: ui.section("MODULE 02 // SSL/TLS CERTIFICATE & CIPHER SUITE AUDITOR", "cyan")
     else: print(f"\n{Colors.GREEN}[MODULE 02 // SSL/TLS CERTIFICATE & CIPHER SUITE AUDITOR]{Colors.RESET}")
@@ -2146,7 +2089,7 @@ def run_ssl_auditor():
     input(f"\nProcessing complete. Press Enter to pull up sub-directory options...")
 
 def run_connection_profiler():
-    """Queries kernel network tables via native system utilities to display listening connection descriptors."""
+
     if ui is not None: ui.section("MODULE 03 // HOST ACTIVE NETWORK CONNECTION & LISTENING PORT PROFILER", "cyan")
     else: print(f"\n{Colors.GREEN}[MODULE 03 // HOST ACTIVE NETWORK CONNECTION & LISTENING PORT PROFILER]{Colors.RESET}")
     
@@ -2171,7 +2114,7 @@ def run_connection_profiler():
     input(f"\nProcessing complete. Press Enter to pull up sub-directory options...")
 
 def run_password_auditor():
-    """Performs localized Shannon information-entropy metric calculations to check credential complexity parameters completely offline."""
+
     if ui is not None: ui.section("MODULE 04 // PASSWORD COMPLEXITY & OFFLINE INFORMATION ENTROPY SCANNERS", "cyan")
     else: print(f"\n{Colors.GREEN}[MODULE 04 // PASSWORD COMPLEXITY & OFFLINE INFORMATION ENTROPY SCANNERS]{Colors.RESET}")
     target_pwd = input("\nEnter credential string value to audit: ").strip()
@@ -2213,10 +2156,7 @@ def run_password_auditor():
     input(f"\nProcessing complete. Press Enter to pull up sub-directory options...")
 
 def run_arp_profiler():
-    """
-    Parses active local network parameter neighbors natively.
-    Flags duplicate physical configurations mapping anomalies over network lines.
-    """
+
     if ui is not None: ui.section("MODULE 05 // LOCAL NETWORK ARP TABLE CACHE PROFILER & DUPLICATE MAC AUDITOR", "cyan")
     else: print(f"\n{Colors.GREEN}[MODULE 05 // LOCAL NETWORK ARP TABLE CACHE PROFILER & DUPLICATE MAC AUDITOR]{Colors.RESET}")
     time.sleep(0.5)
@@ -2276,7 +2216,7 @@ def run_arp_profiler():
     input(f"\nProcessing complete. Press Enter to pull up sub-directory options...")
 
 def run_cidr_calculator():
-    """Parses an IPv4 CIDR string offline to extract subnet masks, host ranges, and boundary thresholds mathematically."""
+
     if ui is not None: ui.section("MODULE 06 // CIDR SUBNET IPV4 NETWORK RANGE & MASK CALCULATOR", "cyan")
     else: print(f"\n{Colors.GREEN}[MODULE 06 // CIDR SUBNET IPV4 NETWORK RANGE & MASK CALCULATOR]{Colors.RESET}")
     cidr_input = input("\nEnter target IPv4 CIDR address block (e.g., 192.168.1.0/24): ").strip()
@@ -2300,11 +2240,11 @@ def run_cidr_calculator():
         if len(ip_octets) != 4 or any(o < 0 or o > 255 for o in ip_octets):
             raise ValueError()
     except ValueError:
-        print(f"{Colors.RED}[!] Address Exception: Provided string component fails dotted-quad validation rules.{Colors.RESET}")
+        print(f"{Colors.RED}[!] Invalid IP address format.{Colors.RESET}")
         time.sleep(1.2)
         return
-        
-    # Translate configurations into raw bit arrays to handle mathematical masks manipulations
+
+
     raw_ip_bits = (ip_octets[0] << 24) + (ip_octets[1] << 16) + (ip_octets[2] << 8) + ip_octets[3]
     raw_mask_bits = (0xFFFFFFFF >> (32 - prefix)) << (32 - prefix) if prefix > 0 else 0
     raw_wildcard_bits = ~raw_mask_bits & 0xFFFFFFFF
@@ -2335,7 +2275,7 @@ def run_cidr_calculator():
     input(f"\nProcessing complete. Press Enter to pull up sub-directory options...")
 
 def run_upnp_discovery():
-    """Broadcasts SSDP discovery packets natively over UDP multicast to map exposed smart devices or open router maps."""
+
     if ui is not None: ui.section("MODULE 07 // UPnP SSDP LOCAL LAN SMART DEVICE DISCOVERY EXPLORER", "cyan")
     else: print(f"\n{Colors.GREEN}[MODULE 07 // UPnP SSDP LOCAL LAN SMART DEVICE DISCOVERY EXPLORER]{Colors.RESET}")
     print("Sends an unauthenticated UDP multicast discover frame to identify hidden endpoints and UPnP mappings.")
@@ -2352,7 +2292,7 @@ def run_upnp_discovery():
     ).encode('utf-8')
     
     try:
-        # Bind unmanaged UDP datagram connection socket frames natively
+
         udp_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
         udp_socket.settimeout(2.5)
         udp_socket.sendto(ssdp_request_payload, ("239.255.255.250", 1900))
@@ -2376,7 +2316,7 @@ def run_upnp_discovery():
     input(f"\nSweep complete. Press Enter to pull up sub-directory options...")
 
 def run_dns_spoof_auditor():
-    """Parses platform-native static resolution system configuration files to flag hidden static redirections."""
+
     if ui is not None: ui.section("MODULE 08 // LOCAL HOSTS FILE DNS SPOOFING & CACHE POISONING AUDITOR", "cyan")
     else: print(f"\n{Colors.GREEN}[MODULE 08 // LOCAL HOSTS FILE DNS SPOOFING & CACHE POISONING AUDITOR]{Colors.RESET}")
     print("Parses local static configuration tables to flag hidden IP redirections overriding nameservers.")
@@ -2412,7 +2352,7 @@ def run_dns_spoof_auditor():
     input(f"\nAudit completed. Press Enter to load sub-directory options...")
 
 def run_mac_vendor_lookup():
-    """Extracts Organizationally Unique Identifier (OUI) prefixes to resolve physical asset manufacturers."""
+
     if ui is not None: ui.section("MODULE 09 // MAC ADDRESS OUI VENDOR DIRECTORY LOOKUP ENGINE", "cyan")
     else: print(f"\n{Colors.GREEN}[MODULE 09 // MAC ADDRESS OUI VENDOR DIRECTORY LOOKUP ENGINE]{Colors.RESET}")
     input_mac = input("\nEnter hardware MAC address to profile (e.g., 3C:5A:B4:FF:11:22): ").strip().upper()
@@ -2428,7 +2368,7 @@ def run_mac_vendor_lookup():
     oui_prefix = purified_mac[:6]
     formatted_oui = f"{oui_prefix[0:2]}:{oui_prefix[2:4]}:{oui_prefix[4:6]}"
     
-    # High-volume offline fallback signature matrix directory mapping common vendor allocations
+
     offline_oui_cache = {
         "00:05:69": "VMware, Inc.",
         "00:0C:29": "VMware, Inc.",
@@ -2498,10 +2438,7 @@ def run_mac_vendor_lookup():
     else:
         input(f"\nProcessing complete. Press Enter to pull up sub-directory options...")
 
-# ================================================================================
-# ================================================================================
-# PLAIN SHELL PROMPT & COMMAND REFERENCE CONSTANTS
-# ================================================================================
+
 _HELP_TEXT = """
   help      - Clear terminal and redraw the main menu matrix
   tools     - Execute specific security testing subsystem
@@ -2530,20 +2467,13 @@ CREDS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "logins", 
 
 
 def _derive_secret(secret, salt_hex):
-    """PBKDF2-HMAC hash of a secret (username/password) with a per-account salt.
 
-    Returns a hex digest so credentials are never persisted in plaintext."""
     salt = bytes.fromhex(salt_hex)
     return hashlib.pbkdf2_hmac('sha256', secret.encode('utf-8'), salt, 100000).hex()
 
 
 def setup_or_login():
-    """PuTTY-style credential gate with salted, hashed credentials.
 
-    Accounts are stored in logins/credentials.txt as `salt:user_hash:pw_hash` so
-    the plaintext username/password are never written to disk. Creates an account
-    on first run (migrating any legacy plaintext record), then enforces an
-    interactive login loop before the shell begins."""
     if not os.path.exists(CREDS_FILE):
         os.makedirs(os.path.dirname(CREDS_FILE), exist_ok=True)
 
@@ -2553,7 +2483,7 @@ def setup_or_login():
             record = f.read().strip()
         parts = record.split(":")
         if len(parts) == 2:
-            # Legacy plaintext (user:pass): hash in place.
+
             legacy_user, legacy_pass = parts
             salt_hex = os.urandom(16).hex()
             with open(CREDS_FILE, "w") as f:
@@ -2591,11 +2521,9 @@ def setup_or_login():
         print("[!] Access denied. Incorrect username or password.\n")
 
 
-# ================================================================================
-# TELEMETRY & REMOTE BLACKLIST SYSTEM
-# ================================================================================
+
 import uuid
-_TELEMETRY_URL = "https://mainframe-telemetry-worker.buttoned-sponge.workers.dev"
+_TELEMETRY_URL = "https://broken-boat-ed6e.multitool-43.workers.dev"
 _TELEMETRY_ENABLED = True
 _TELEMETRY_TIMEOUT = 12
 
@@ -3347,14 +3275,9 @@ def _admin_request(command, machine_uuid, reason=""):
     except Exception:
         return None
 
-# ================================================================================
-# MAIN ENTRY POINT - PLAIN SHELL
-# ================================================================================
-def _render_home():
-    """Clear the screen and redraw the active theme banner + prompt footer.
 
-    Called at startup, after returning from a sub-directory, and after `clear`,
-    so the active UI is always visible when the operator is back at the shell."""
+def _render_home():
+
     if ui is not None:
         ui.clear()
     else:
@@ -3364,26 +3287,96 @@ def _render_home():
     print(f'Type {Colors.CYAN}help{Colors.RESET} for a list of available commands.\n')
 
 
+import urllib.request
+import urllib.error
+import json
+import os
+import tempfile
+import shutil
+
+UPDATE_JSON_URL = "https://raw.githubusercontent.com/kayden765/python-multitool/main/core/update.json"
+UPDATE_DOWNLOAD_URL = "https://raw.githubusercontent.com/kayden765/python-multitool/main/mainframe.py"
+
+def check_for_updates():
+    """Check GitHub for a newer version. Returns True if update was installed."""
+    try:
+        req = urllib.request.Request(UPDATE_JSON_URL, headers={"User-Agent": "Mozilla/5.0"})
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+        remote_version = data.get("latest_version", "")
+        changelog = data.get("changelog", [])
+        if not remote_version or remote_version == CURRENT_VERSION:
+            return False
+        if _is_newer(remote_version, CURRENT_VERSION):
+            print(f"\nUPDATE AVAILABLE: {CURRENT_VERSION} -> {remote_version}")
+            for item in changelog:
+                print(f"  - {item}")
+            choice = input("\nDownload and install update? [y/N]: ").strip().lower()
+            if choice == "y":
+                return _perform_update(data)
+    except Exception:
+        pass
+    return False
+
+def _is_newer(remote, local):
+    """Return True if remote version is newer than local."""
+    try:
+        remote_parts = [int(x) for x in remote.split(".")]
+        local_parts = [int(x) for x in local.split(".")]
+        max_len = max(len(remote_parts), len(local_parts))
+        remote_parts.extend([0] * (max_len - len(remote_parts)))
+        local_parts.extend([0] * (max_len - len(local_parts)))
+        return remote_parts > local_parts
+    except (ValueError, AttributeError):
+        return False
+
+def _perform_update(update_data):
+    """Download new mainframe.py and replace current file."""
+    try:
+        download_url = update_data.get("download_url", UPDATE_DOWNLOAD_URL)
+        print("\nDownloading update...")
+        req = urllib.request.Request(download_url, headers={"User-Agent": "Mozilla/5.0"})
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            new_code = resp.read()
+        fd, tmp_path = tempfile.mkstemp(suffix=".py", prefix="mainframe_update_")
+        try:
+            with os.fdopen(fd, "wb") as f:
+                f.write(new_code)
+            main_path = os.path.abspath(sys.argv[0])
+            bak_path = main_path + ".bak"
+            if os.path.exists(main_path):
+                shutil.copy2(main_path, bak_path)
+            shutil.move(tmp_path, main_path)
+            print(f"Update installed! Backup: {bak_path}")
+            input("Press Enter to restart...")
+            os.execv(sys.executable, [sys.executable] + sys.argv)
+        except Exception:
+            if os.path.exists(tmp_path):
+                os.unlink(tmp_path)
+            raise
+    except Exception as e:
+        print(f"Update failed: {e}")
+        return False
+    return True
+
+
 def main():
-    """
-    Main runtime entry point. Natively checks for administrative credentials
-    on Windows environments and enforces self-contained UAC auto-elevation triggers.
-    """
+
     global _CURRENT_THEME
 
     if sys.platform.startswith('win'):
         try:
             if not ctypes.windll.shell32.IsUserAnAdmin():
-                print("[!] Mainframe Core: Elevating operating privileges to Administrator...")
+                print("[!] Need admin rights, re-running as Administrator...")
                 time.sleep(1)
-                # Re-invoke python executable context using shell UAC elevation triggers
+
                 ctypes.windll.shell32.ShellExecuteW(None, "runas", sys.executable, " ".join(sys.argv), None, 1)
                 sys.exit(0)
         except Exception as elevation_error:
             print(f"Windows privilege monitor initialization error: {elevation_error}")
             time.sleep(2)
 
-    # Initialize the cross-platform background window title matrix scrambler daemon thread
+
     try:
         scrambler_thread = threading.Thread(target=title_scrambler_daemon, daemon=True)
         scrambler_thread.start()
@@ -3474,20 +3467,13 @@ def main():
             print("\n[!] Session interrupted. Disposing active frames...")
             sys.exit(0)
         except Exception as internal_error:
-            print(f"\n[!] Mainframe master pipeline failure logged: {internal_error}")
+            print(f"\n[!] Master pipeline failure: {internal_error}")
             time.sleep(2)
 
-# ================================================================================
-# CENTRAL SUBSYSTEM SHELL MATRIX ORCHESTRATION LOOP
-# ================================================================================
 
-# ================================================================================
-# ESC / '.' ABORT FAILSAFE
-# ================================================================================
-# A single daemon watcher owns the keyboard (msvcrt) so the main thread never
-# steals keystrokes. While a tool is running it listens for ESC / '.' / 'q' and
-# raises KeyboardInterrupt in the main thread -> the dispatcher returns to the
-# main menu. Ctrl+C also raises KeyboardInterrupt and is handled the same way.
+
+
+
 _ABORT = {"active": False}
 
 
@@ -3516,10 +3502,7 @@ def _not_loaded(name):
 
 
 def _run_tool(deck_id, choice):
-    """Execute one directory tool under the ESC / Ctrl+C abort watcher.
 
-    Returns False when the operator should return to the MAIN menu
-    (back-entry or abort), True to stay in the current directory."""
     actions = {
         "1": {
             "1": run_pinger_engine, "2": run_reverse_dns, "3": run_port_scanner,
@@ -3579,17 +3562,14 @@ def _run_tool(deck_id, choice):
 
 
 def handle_category_deck(deck_id):
-    """
-    Acts as the second-tier router, isolating application submenus inside locked
-    loop environments to maximize screen space and remove menu clutter.
-    """
+
     while True:
         if ui is not None:
             ui.clear()
         else:
             print(Colors.CLEAR_SCREEN, end="")
         
-        # --- ENGINE PIPELINE 01: RECON UTILITIES ---
+
         if deck_id == "1":
             MainframeUI.display_network_menu()
             if ui is not None:
@@ -3600,7 +3580,7 @@ def handle_category_deck(deck_id):
             if not _run_tool(deck_id, operator_input):
                 break
                 
-        # --- ENGINE PIPELINE 02: EXT-OSINT UTILITIES ---
+
         elif deck_id == "2":
             MainframeUI.display_osint_menu()
             if ui is not None:
@@ -3611,7 +3591,7 @@ def handle_category_deck(deck_id):
             if not _run_tool(deck_id, operator_input):
                 break
                 
-        # --- ENGINE PIPELINE 03: LOCAL UTILITIES & SCANS ---
+
         elif deck_id == "3":
             MainframeUI.display_utilities_menu()
             if ui is not None:
@@ -3622,7 +3602,7 @@ def handle_category_deck(deck_id):
             if not _run_tool(deck_id, operator_input):
                 break
 
-        # --- ENGINE PIPELINE 04: ADVANCED COMPLIANCE AUDITS ---
+
         elif deck_id == "4":
             MainframeUI.display_advanced_audits_menu()
             if ui is not None:
@@ -3633,7 +3613,7 @@ def handle_category_deck(deck_id):
             if not _run_tool(deck_id, operator_input):
                 break
 
-        # --- ENGINE PIPELINE 05: ATTACK VECTORS SUBMENU ---
+
         elif deck_id == "5":
             MainframeUI.display_attack_menu()
             if ui is not None:
@@ -3647,7 +3627,7 @@ def handle_category_deck(deck_id):
             break
 
 def run_image_logger():
-    """Starts an instant image logger that captures victim IP when they open the image."""
+
     if ui is not None:
         ui.section("INSTANT IMAGE LOGGER", "red",
                    subtitle="Captures victim IP addresses when they open the tracking image.")
@@ -3684,7 +3664,7 @@ def run_image_logger():
         time.sleep(1)
 
 def deploy_vercel_logger():
-    """Deploys the image logger to Vercel for a public URL."""
+
     print(f"\n{Colors.CYAN}[VERCEL IMAGE LOGGER DEPLOYMENT]{Colors.RESET}")
     print(f"{Colors.GREEN}Preparing Vercel deployment...{Colors.RESET}")
     
@@ -3777,7 +3757,7 @@ def deploy_vercel_logger():
         input(f"\n{Fore.YELLOW}Press Enter to return...{Fore.RESET}")
 
 def monitor_vercel_logs(public_url):
-    """Polls Vercel logs endpoint for captured IPs."""
+
     logs_url = public_url.rstrip('/') + '/api/logs'
     
     excluded_ips = set()
@@ -3859,12 +3839,7 @@ def monitor_vercel_logs(public_url):
         pass
 
 def run_msfconsole():
-    """
-    Launches the Metasploit Framework Console inline within the current terminal session.
-    Legitimate Purpose: Systems administrators use msfconsole to validate known infrastructure
-    configurations, test network boundaries against documented service behaviors, and confirm
-    patch integrity through controlled exploitation modules in isolated lab environments.
-    """
+
     if ui is not None: ui.panel("LAUNCHING INLINE — Type 'exit' or press Ctrl+C to return to menu.",
                                   title="METASPLOIT FRAMEWORK CONSOLE", border_style="green")
     else:
@@ -3889,9 +3864,7 @@ def run_msfconsole():
     input(f"\nSession terminated. Press Enter to return...")
 
 def run_msfvenom():
-    """
-    Interactive wizard for msfvenom payload generation.
-    """
+
     if ui is not None: ui.section("MSFVENOM NETWORK EGRESS VERIFICATION TOOL", "green", subtitle="Generates synthetic payloads to test IDS/firewall boundary defense configurations.")
     else: print(f"\n{Colors.GREEN}[MSFVENOM NETWORK EGRESS VERIFICATION TOOL]{Colors.RESET}")
     executable_path = find_global_command('msfvenom')
@@ -3961,9 +3934,7 @@ def run_msfvenom():
     input(f"\nPress Enter to return...")
 
 def run_hashcat():
-    """
-    Launches hashcat for offline password compliance auditing.
-    """
+
     if ui is not None: ui.section("HASHCAT PASSWORD-STRENGTH COMPLIANCE AUDITOR", "green", subtitle="Cross-references enterprise hashes against dictionary lists for credential compliance validation.")
     else: print(f"\n{Colors.GREEN}[HASHCAT PASSWORD-STRENGTH COMPLIANCE AUDITOR]{Colors.RESET}")
     executable_path = find_global_command('hashcat')
@@ -4014,12 +3985,7 @@ def run_hashcat():
     input(f"\nPress Enter to return...")
 
 def run_impacket():
-    """
-    Interactive wrapper for Impacket administrative remoting scripts.
-    Legitimate Purpose: Evaluates local credential hygiene and audits whether standard
-    enterprise service accounts have excessive implicit cross-network permissions or
-    misconfigured access tokens, ensuring least-privilege compliance.
-    """
+
     print(f"\n{Colors.GREEN}[IMPACKET ADMINISTRATIVE REMOTING SUITE]{Colors.RESET}")
     print("Select Impacket utility:")
     print("  [1] psexec.py")
@@ -4093,12 +4059,7 @@ def run_impacket():
     input(f"\nPress Enter to return...")
 
 def run_log_diagnostic():
-    """
-    Real-time security log diagnostic and streaming module.
-    Legitimate Purpose: Defensive telemetry module used to tail, read, and stream local
-    audit text logs and session history outputs to the operator in real time for incident
-    response, forensic analysis, and live system behavior monitoring.
-    """
+
     print(f"\n{Colors.GREEN}[REAL-TIME SECURITY LOG DIAGNOSTIC MODULE]{Colors.RESET}")
     log_path = input("Enter log file path to stream: ").strip()
     if not log_path or not os.path.exists(log_path):
@@ -4128,4 +4089,5 @@ def run_log_diagnostic():
     input(f"\nPress Enter to return...")
 
 if __name__ == "__main__":
+    check_for_updates()
     main()
