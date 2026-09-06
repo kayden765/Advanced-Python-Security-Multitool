@@ -69,6 +69,9 @@ core/modules/discord_admin_bot.py
 core/image_logger/logs/
 core/image_logger/*.log
 
+# Local environment files
+.env.local
+
 # Vercel deployment
 core/vercel-image-logger/.vercel/
 core/vercel-image-logger/node_modules/
