@@ -58,6 +58,13 @@ core/input/
 *excluded*.txt
 *excluded*.json
 
+# Cloudflare Workers
+.wrangler/
+core/modules/
+
+# Discord admin bot
+core/modules/discord_admin_bot.py
+
 # Local image logger
 core/image_logger/logs/
 core/image_logger/*.log
