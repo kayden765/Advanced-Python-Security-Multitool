@@ -4,7 +4,7 @@
 **Architecture:** Multi-Tier Nested Subsystem Shell (Directory-Driven Layout)  
 **Platform:** Cross-Platform Windows/Linux/macOS  
 **Python:** 3.8+  
-**Tools:** 40-IN-1 Security Platform  
+**Tools:** 45-IN-1 Security Platform  
 
 
 ---
@@ -23,11 +23,10 @@ this application may be detected by antivirus due to the msfvenom module and the
 8. [Sub-Directory 04 — Advanced Infrastructure Audits & Integrity](#sub-directory-04--advanced-infrastructure-audits--integrity)
 9. [Sub-Directory 05 — Attack Vectors, Exploit Frameworks & Defensive Auditing](#sub-directory-05--attack-vectors-exploit-frameworks--defensive-auditing)
 10. [Image Logger — Vercel Deployment](#image-logger--vercel-deployment)
-11. [Logging & Privacy](#logging--privacy)
-12. [Configuration & Customization](#configuration--customization)
-13. [UI Themes & Directory Banners](#ui-themes--directory-banners)
-14. [Dependencies](#dependencies)
-15. [Disclaimer](#disclaimer)
+11. [Configuration & Customization](#configuration--customization)
+12. [UI Themes & Directory Banners](#ui-themes--directory-banners)
+13. [Dependencies](#dependencies)
+14. [Disclaimer](#disclaimer)
 
 ---
 
