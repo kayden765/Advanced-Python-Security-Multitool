@@ -8,6 +8,8 @@ requests==2.31.0
 fade==0.0.9
 beautifulsoup4==4.12.3
 fake-useragent==1.5.1
+discord.py
+six
 
 # Attack & Network Modules
 aiohttp==3.9.5
@@ -17,13 +19,15 @@ pythonping==1.0.0
 # Defensive Auditing & Verification
 impacket>=0.12.0
 
+# OSINT & Identity Modules
+sherlock-project
+holehe
+socialscan
+
 # Note: Some modules require external tools not installed via pip:
 # - hashcat (password compliance auditor)
 # - metasploit-framework (msfconsole / msfvenom)
-# - sherlock-project (username tracer)
-# - phoneinfoga (telecom scanner)
-# - holehe (email auditor)
-# - socialscan (identity profiler)
+# - phoneinfoga (telecom scanner - download from https://github.com/sundowndev/phoneinfoga/releases)
 # - nmap (port scanning)
 # - tshark/wireshark (packet monitoring)
 # - node.js + vercel CLI (image logger deployment)
