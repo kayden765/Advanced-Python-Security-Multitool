@@ -1,0 +1,11 @@
+{
+  "latest_version": "2.0.0",
+  "min_version": "1.0.0",
+  "changelog": [
+    "Fixed critical bug in network scanner",
+    "Added new OSINT modules",
+    "Improved error handling"
+  ],
+  "download_url": "https://raw.githubusercontent.com/kayden765/python-multitool/main/mainframe.py",
+  "release_date": "2024-01-15"
+}

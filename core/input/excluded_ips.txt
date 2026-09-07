@@ -1,0 +1,7 @@
+# Excluded IPs - one per line
+# These IPs will be replaced with [REDACTED] in all local logs
+# Lines starting with # are ignored
+# Your local IP is auto-detected, but you can add additional IPs here
+# Examples:
+# 192.168.1.100
+# 10.0.0.5
