@@ -1,8 +1,0 @@
-name = "mainframe-telemetry-worker"
-main = "worker.js"
-compatibility_date = "2024-01-01"
-
-[[kv_namespaces]]
-binding = "BLACKLIST_KV"
-id = "3247e61b1d964e278c63aac2853c0450"
-preview_id = "8835c92570a842b29bd97a46ca9c9bf3"
