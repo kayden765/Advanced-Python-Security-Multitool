@@ -1,8 +1,0 @@
-{
-  "version": 2,
-  "routes": [
-    { "src": "/api/track", "dest": "/api/track.js" },
-    { "src": "/api/logs", "dest": "/api/track.js" },
-    { "src": "/(.*)", "dest": "/api/track.js" }
-  ]
-}
