@@ -59,8 +59,7 @@ core/input/
 *excluded*.json
 
 # Cloudflare Workers
-.wrangler/
-core/modules/
+
 
 # Discord admin bot
 core/modules/discord_admin_bot.py
